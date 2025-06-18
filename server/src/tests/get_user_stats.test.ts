@@ -1,34 +1,37 @@
-
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { resetDB, createDB } from '../helpers';
 import { db } from '../db';
 import { usersTable, tasksTable, focusSessionsTable } from '../db/schema';
 import { type GetUserStatsInput } from '../schema';
 import { getUserStats } from '../handlers/get_user_stats';
+import { eq } from 'drizzle-orm';
 
-// Test data
-const testUser = {
-  email: 'test@example.com',
-  password_hash: 'hashed_password',
-  name: 'Test User'
-};
-
-const testDate = new Date('2023-12-15');
-
-const testInput: GetUserStatsInput = {
-  user_id: 1,
-  date: testDate
-};
+// Helper function to create a test user with Neon Auth ID
+async function createTestUser(email: string = 'test@example.com', name: string = 'Test User') {
+  const result = await db.insert(usersTable)
+    .values({
+      neon_auth_user_id: `neon_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      email,
+      name
+    })
+    .returning()
+    .execute();
+  return result[0];
+}
 
 describe('getUserStats', () => {
   beforeEach(createDB);
   afterEach(resetDB);
 
-  it('should return zero stats for user with no data', async () => {
-    // Create user first
-    await db.insert(usersTable).values(testUser).execute();
+  it('should return user stats with no data', async () => {
+    // Create a test user first
+    const user = await createTestUser();
 
-    const result = await getUserStats(testInput);
+    const input: GetUserStatsInput = {
+      user_id: user.id
+    };
+
+    const result = await getUserStats(input);
 
     expect(result.total_focus_minutes).toEqual(0);
     expect(result.completed_tasks_count).toEqual(0);
@@ -36,181 +39,209 @@ describe('getUserStats', () => {
     expect(result.active_session).toBeNull();
   });
 
-  it('should return correct task counts', async () => {
-    // Create user
-    await db.insert(usersTable).values(testUser).execute();
+  it('should return user stats with tasks', async () => {
+    // Create a test user first
+    const user = await createTestUser();
 
-    // Create tasks for the target date
-    await db.insert(tasksTable).values([
-      {
-        user_id: 1,
-        title: 'Completed Task',
-        scheduled_date: '2023-12-15',
-        completed: true,
-        completed_at: new Date('2023-12-15T10:00:00Z')
-      },
-      {
-        user_id: 1,
-        title: 'Incomplete Task',
-        scheduled_date: '2023-12-15',
-        completed: false
-      },
-      {
-        user_id: 1,
-        title: 'Another Completed Task',
-        scheduled_date: '2023-12-15',
-        completed: true,
-        completed_at: new Date('2023-12-15T14:00:00Z')
-      }
-    ]).execute();
+    const testDate = new Date('2024-01-15');
 
-    const result = await getUserStats(testInput);
+    // Create tasks
+    await db.insert(tasksTable)
+      .values([
+        {
+          user_id: user.id,
+          title: 'Completed Task',
+          completed: true,
+          scheduled_date: '2024-01-15'
+        },
+        {
+          user_id: user.id,
+          title: 'Pending Task',
+          completed: false,
+          scheduled_date: '2024-01-15'
+        }
+      ])
+      .execute();
 
-    expect(result.total_tasks_count).toEqual(3);
-    expect(result.completed_tasks_count).toEqual(2);
-  });
-
-  it('should return correct focus minutes for completed sessions', async () => {
-    // Create user and task
-    await db.insert(usersTable).values(testUser).execute();
-    await db.insert(tasksTable).values({
-      user_id: 1,
-      title: 'Focus Task',
-      scheduled_date: '2023-12-15',
-      completed: false
-    }).execute();
-
-    // Create focus sessions for the target date
-    await db.insert(focusSessionsTable).values([
-      {
-        user_id: 1,
-        task_id: 1,
-        duration_minutes: 25,
-        started_at: new Date('2023-12-15T09:00:00Z'),
-        ended_at: new Date('2023-12-15T09:25:00Z'),
-        completed: true
-      },
-      {
-        user_id: 1,
-        task_id: 1,
-        duration_minutes: 30,
-        started_at: new Date('2023-12-15T10:00:00Z'),
-        ended_at: new Date('2023-12-15T10:30:00Z'),
-        completed: true
-      },
-      {
-        user_id: 1,
-        task_id: 1,
-        duration_minutes: 15,
-        started_at: new Date('2023-12-15T11:00:00Z'),
-        ended_at: new Date('2023-12-15T11:15:00Z'),
-        completed: false // Not completed - should not count
-      }
-    ]).execute();
-
-    const result = await getUserStats(testInput);
-
-    expect(result.total_focus_minutes).toEqual(55); // 25 + 30, excluding incomplete session
-  });
-
-  it('should return active session when one exists', async () => {
-    // Create user and task
-    await db.insert(usersTable).values(testUser).execute();
-    await db.insert(tasksTable).values({
-      user_id: 1,
-      title: 'Active Task',
-      scheduled_date: '2023-12-15',
-      completed: false
-    }).execute();
-
-    // Create active session (no ended_at)
-    const sessionResult = await db.insert(focusSessionsTable).values({
-      user_id: 1,
-      task_id: 1,
-      duration_minutes: 25,
-      started_at: new Date('2023-12-15T09:00:00Z'),
-      completed: false
-    }).returning().execute();
-
-    const result = await getUserStats(testInput);
-
-    expect(result.active_session).not.toBeNull();
-    expect(result.active_session?.id).toEqual(sessionResult[0].id);
-    expect(result.active_session?.user_id).toEqual(1);
-    expect(result.active_session?.task_id).toEqual(1);
-    expect(result.active_session?.duration_minutes).toEqual(25);
-    expect(result.active_session?.ended_at).toBeNull();
-  });
-
-  it('should filter data by date correctly', async () => {
-    // Create user and task
-    await db.insert(usersTable).values(testUser).execute();
-    await db.insert(tasksTable).values([
-      {
-        user_id: 1,
-        title: 'Task for target date',
-        scheduled_date: '2023-12-15',
-        completed: true,
-        completed_at: new Date('2023-12-15T10:00:00Z')
-      },
-      {
-        user_id: 1,
-        title: 'Task for different date',
-        scheduled_date: '2023-12-16',
-        completed: true,
-        completed_at: new Date('2023-12-16T10:00:00Z')
-      }
-    ]).execute();
-
-    // Create focus sessions for different dates
-    await db.insert(focusSessionsTable).values([
-      {
-        user_id: 1,
-        task_id: 1,
-        duration_minutes: 25,
-        started_at: new Date('2023-12-15T09:00:00Z'),
-        ended_at: new Date('2023-12-15T09:25:00Z'),
-        completed: true
-      },
-      {
-        user_id: 1,
-        task_id: 2,
-        duration_minutes: 30,
-        started_at: new Date('2023-12-16T09:00:00Z'),
-        ended_at: new Date('2023-12-16T09:30:00Z'),
-        completed: true
-      }
-    ]).execute();
-
-    const result = await getUserStats(testInput);
-
-    // Should only include data for 2023-12-15
-    expect(result.total_tasks_count).toEqual(1);
-    expect(result.completed_tasks_count).toEqual(1);
-    expect(result.total_focus_minutes).toEqual(25);
-  });
-
-  it('should use current date when no date provided', async () => {
-    const today = new Date();
-    const todayDateString = today.toISOString().split('T')[0];
-
-    // Create user and task for today
-    await db.insert(usersTable).values(testUser).execute();
-    await db.insert(tasksTable).values({
-      user_id: 1,
-      title: 'Today Task',
-      scheduled_date: todayDateString,
-      completed: true,
-      completed_at: new Date()
-    }).execute();
-
-    const inputWithoutDate: GetUserStatsInput = {
-      user_id: 1
+    const input: GetUserStatsInput = {
+      user_id: user.id,
+      date: testDate
     };
 
-    const result = await getUserStats(inputWithoutDate);
+    const result = await getUserStats(input);
 
-    expect(result.total_tasks_count).toEqual(1);
+    expect(result.total_focus_minutes).toEqual(0);
     expect(result.completed_tasks_count).toEqual(1);
+    expect(result.total_tasks_count).toEqual(2);
+    expect(result.active_session).toBeNull();
+  });
+
+  it('should return user stats with focus sessions', async () => {
+    // Create a test user first
+    const user = await createTestUser();
+
+    const testDate = new Date('2024-01-15');
+
+    // Create a task
+    const taskResult = await db.insert(tasksTable)
+      .values({
+        user_id: user.id,
+        title: 'Focus Task',
+        scheduled_date: '2024-01-15'
+      })
+      .returning()
+      .execute();
+
+    const task = taskResult[0];
+
+    // Create completed focus sessions with test date
+    await db.insert(focusSessionsTable)
+      .values([
+        {
+          user_id: user.id,
+          task_id: task.id,
+          duration_minutes: 30,
+          started_at: testDate,
+          ended_at: testDate,
+          completed: true
+        },
+        {
+          user_id: user.id,
+          task_id: task.id,
+          duration_minutes: 45,
+          started_at: testDate,
+          ended_at: testDate,
+          completed: true
+        }
+      ])
+      .execute();
+
+    const input: GetUserStatsInput = {
+      user_id: user.id,
+      date: testDate
+    };
+
+    const result = await getUserStats(input);
+
+    expect(result.total_focus_minutes).toEqual(75);
+    expect(result.completed_tasks_count).toEqual(0);
+    expect(result.total_tasks_count).toEqual(1);
+    expect(result.active_session).toBeNull();
+  });
+
+  it('should return user stats with active session', async () => {
+    // Create a test user first
+    const user = await createTestUser();
+
+    const testDate = new Date('2024-01-15');
+
+    // Create a task
+    const taskResult = await db.insert(tasksTable)
+      .values({
+        user_id: user.id,
+        title: 'Active Focus Task',
+        scheduled_date: '2024-01-15'
+      })
+      .returning()
+      .execute();
+
+    const task = taskResult[0];
+
+    // Create an active focus session (not ended)
+    const sessionResult = await db.insert(focusSessionsTable)
+      .values({
+        user_id: user.id,
+        task_id: task.id,
+        duration_minutes:  60,
+        started_at: testDate,
+        completed: false
+      })
+      .returning()
+      .execute();
+
+    const session = sessionResult[0];
+
+    const input: GetUserStatsInput = {
+      user_id: user.id,
+      date: testDate
+    };
+
+    const result = await getUserStats(input);
+
+    expect(result.total_focus_minutes).toEqual(0); // Active session doesn't count
+    expect(result.completed_tasks_count).toEqual(0);
+    expect(result.total_tasks_count).toEqual(1);
+    expect(result.active_session).not.toBeNull();
+    expect(result.active_session?.id).toEqual(session.id);
+    expect(result.active_session?.duration_minutes).toEqual(60);
+  });
+
+  it('should filter stats by date', async () => {
+    // Create a test user first
+    const user = await createTestUser();
+
+    // Create tasks for different dates
+    await db.insert(tasksTable)
+      .values([
+        {
+          user_id: user.id,
+          title: 'Today Task',
+          completed: true,
+          scheduled_date: '2024-01-15'
+        },
+        {
+          user_id: user.id,
+          title: 'Yesterday Task',
+          completed: true,
+          scheduled_date: '2024-01-14'
+        }
+      ])
+      .execute();
+
+    const input: GetUserStatsInput = {
+      user_id: user.id,
+      date: new Date('2024-01-15')
+    };
+
+    const result = await getUserStats(input);
+
+    expect(result.completed_tasks_count).toEqual(1);
+    expect(result.total_tasks_count).toEqual(1);
+  });
+
+  it('should not include stats from other users', async () => {
+    // Create two test users
+    const user1 = await createTestUser('user1@example.com', 'User One');
+    const user2 = await createTestUser('user2@example.com', 'User Two');
+
+    const testDate = new Date('2024-01-15');
+
+    // Create tasks for both users
+    await db.insert(tasksTable)
+      .values([
+        {
+          user_id: user1.id,
+          title: 'User1 Task',
+          completed: true,
+          scheduled_date: '2024-01-15'
+        },
+        {
+          user_id: user2.id,
+          title: 'User2 Task',
+          completed: true,
+          scheduled_date: '2024-01-15'
+        }
+      ])
+      .execute();
+
+    const input: GetUserStatsInput = {
+      user_id: user1.id,
+      date: testDate
+    };
+
+    const result = await getUserStats(input);
+
+    expect(result.completed_tasks_count).toEqual(1);
+    expect(result.total_tasks_count).toEqual(1);
   });
 });

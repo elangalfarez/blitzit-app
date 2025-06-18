@@ -1,107 +1,103 @@
+/* Neon Auth Integration Styles */
+.neon-glow {
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
+  animation: pulse-glow 2s ease-in-out infinite alternate;
+}
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-@layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222.2 84% 4.9%;
-    --muted: 210 40% 96%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96%;
-    --accent-foreground: 222.2 84% 4.9%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
-    --radius: 0.75rem;
+@keyframes pulse-glow {
+  from {
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
   }
-
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 84% 4.9%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 94.1%;
+  to {
+    box-shadow: 0 0 30px rgba(59, 130, 246, 0.8);
   }
 }
 
-@layer base {
-  * {
-    @apply border-border;
+.neon-auth-badge {
+  background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+  color: white;
+  font-weight: 600;
+  padding: 0.25rem 0.75rem;
+  border-radius: 1rem;
+  font-size: 0.75rem;
+  animation: shimmer 2s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
   }
-  body {
-    @apply bg-background text-foreground;
+  100% {
+    background-position: 200% 0;
   }
 }
 
-/* Custom animations for focus session */
-@layer components {
-  .blitz-pulse {
-    animation: blitz-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  }
+.stack-auth-loading {
+  background: linear-gradient(90deg, #3B82F6, #8B5CF6, #3B82F6);
+  background-size: 200% 200%;
+  animation: gradient-shift 1.5s ease-in-out infinite;
 }
 
-@keyframes blitz-pulse {
-  0%, 100% {
-    opacity: 1;
-    transform: scale(1);
+@keyframes gradient-shift {
+  0% {
+    background-position: 0% 50%;
   }
   50% {
-    opacity: 0.8;
-    transform: scale(1.05);
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
   }
 }
 
-/* Focus session overlay effects */
-.focus-overlay {
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+/* Enhanced focus session styles for Neon integration */
+.focus-session-neon {
+  border: 2px solid #3B82F6;
+  box-shadow: 0 0 30px rgba(59, 130, 246, 0.3);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(139, 92, 246, 0.1));
 }
 
-/* Progress bar animations */
-.progress-animate {
-  transition: all 0.3s ease-in-out;
+/* Database connection indicator */
+.db-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  color: #059669;
 }
 
-/* Custom scrollbar for dark mode */
-.dark ::-webkit-scrollbar {
-  width: 8px;
+.db-status::before {
+  content: "●";
+  color: #10B981;
+  animation: pulse 2s ease-in-out infinite;
 }
 
-.dark ::-webkit-scrollbar-track {
-  background: #374151;
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
-.dark ::-webkit-scrollbar-thumb {
-  background: #6b7280;
-  border-radius: 4px;
+/* Dark mode enhancements for Neon Auth */
+.dark .neon-auth-badge {
+  background: linear-gradient(135deg, #60A5FA, #A78BFA);
 }
 
-.dark ::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
+.dark .db-status {
+  background: rgba(34, 197, 94, 0.2);
+  border-color: rgba(34, 197, 94, 0.3);
+  color: #10B981;
+}
+
+.dark .focus-session-neon {
+  border-color: #60A5FA;
+  box-shadow: 0 0 30px rgba(96, 165, 250, 0.2);
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.1), rgba(167, 139, 250, 0.1));
 }

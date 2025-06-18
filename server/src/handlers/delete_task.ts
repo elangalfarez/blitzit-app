@@ -1,11 +1,23 @@
-
 import { db } from '../db';
 import { tasksTable } from '../db/schema';
 import { eq, and } from 'drizzle-orm';
 
 export const deleteTask = async (taskId: number, userId: number): Promise<void> => {
   try {
-    // Delete the task only if it belongs to the specified user
+    // First check if task exists and belongs to user
+    const existingTasks = await db.select()
+      .from(tasksTable)
+      .where(and(
+        eq(tasksTable.id, taskId),
+        eq(tasksTable.user_id, userId)
+      ))
+      .execute();
+
+    if (existingTasks.length === 0) {
+      throw new Error('Task not found or access denied');
+    }
+
+    // Delete the task
     await db.delete(tasksTable)
       .where(and(
         eq(tasksTable.id, taskId),

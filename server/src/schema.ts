@@ -4,8 +4,8 @@ import { z } from 'zod';
 // User schema
 export const userSchema = z.object({
   id: z.number(),
+  neon_auth_user_id: z.string(),
   email: z.string().email(),
-  password_hash: z.string(),
   name: z.string(),
   created_at: z.coerce.date(),
   updated_at: z.coerce.date()
@@ -58,6 +58,15 @@ export const signInInputSchema = z.object({
 });
 
 export type SignInInput = z.infer<typeof signInInputSchema>;
+
+// Neon Auth context schema
+export const neonAuthUserSchema = z.object({
+  id: z.string(),
+  email: z.string().email(),
+  name: z.string()
+});
+
+export type NeonAuthUser = z.infer<typeof neonAuthUserSchema>;
 
 // Task input schemas
 export const createTaskInputSchema = z.object({
@@ -115,6 +124,7 @@ export type GetUserStatsInput = z.infer<typeof getUserStatsInputSchema>;
 // Response schemas
 export const authResponseSchema = z.object({
   user: userSchema,
+  success: z.boolean(),
   token: z.string()
 });
 

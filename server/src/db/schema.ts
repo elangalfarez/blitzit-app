@@ -4,8 +4,8 @@ import { relations } from 'drizzle-orm';
 
 export const usersTable = pgTable('users', {
   id: serial('id').primaryKey(),
+  neon_auth_user_id: varchar('neon_auth_user_id', { length: 255 }).notNull().unique(),
   email: varchar('email', { length: 255 }).notNull().unique(),
-  password_hash: text('password_hash').notNull(),
   name: varchar('name', { length: 255 }).notNull(),
   created_at: timestamp('created_at').defaultNow().notNull(),
   updated_at: timestamp('updated_at').defaultNow().notNull(),

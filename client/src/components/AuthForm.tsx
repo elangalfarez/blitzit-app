@@ -1,4 +1,3 @@
-
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -6,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { trpc } from '@/utils/trpc';
+import { useStackAuth } from './StackAuthProvider';
 import type { SignUpInput, SignInInput, User } from '../../../server/src/schema';
 
 interface AuthFormProps {
@@ -13,6 +13,7 @@ interface AuthFormProps {
 }
 
 export function AuthForm({ onAuth }: AuthFormProps) {
+  const { signUp: stackSignUp, signIn: stackSignIn, isLoading: stackLoading } = useStackAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [signUpForm, setSignUpForm] = useState<SignUpInput>({
@@ -31,8 +32,21 @@ export function AuthForm({ onAuth }: AuthFormProps) {
     setError(null);
 
     try {
+      // First authenticate with Stack Auth
+      const stackResult = await stackSignUp(signUpForm.email, signUpForm.password, signUpForm.name);
+      
+      if (!stackResult.success) {
+        throw new Error('Stack Auth signup failed');
+      }
+
+      // Then register with our backend
       const response = await trpc.signUp.mutate(signUpForm);
-      onAuth(response);
+      
+      if (response.success) {
+        onAuth({ user: response.user, token: response.token });
+      } else {
+        throw new Error('Backend registration failed');
+      }
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Sign up failed');
     } finally {
@@ -46,8 +60,21 @@ export function AuthForm({ onAuth }: AuthFormProps) {
     setError(null);
 
     try {
+      // First authenticate with Stack Auth
+      const stackResult = await stackSignIn(signInForm.email, signInForm.password);
+      
+      if (!stackResult.success) {
+        throw new Error('Stack Auth signin failed');
+      }
+
+      // Then authenticate with our backend
       const response = await trpc.signIn.mutate(signInForm);
-      onAuth(response);
+      
+      if (response.success) {
+        onAuth({ user: response.user, token: response.token });
+      } else {
+        throw new Error('Backend authentication failed');
+      }
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Sign in failed');
     } finally {
@@ -60,7 +87,7 @@ export function AuthForm({ onAuth }: AuthFormProps) {
       <CardHeader className="text-center">
         <CardTitle className="text-gray-900 dark:text-white">Welcome to Blitzit</CardTitle>
         <CardDescription className="text-gray-600 dark:text-gray-400">
-          Your productivity companion
+          Your productivity companion powered by Neon Auth
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -90,8 +117,8 @@ export function AuthForm({ onAuth }: AuthFormProps) {
                 }
                 required
               />
-              <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? 'Signing In...' : 'Sign In'}
+              <Button type="submit" className="w-full" disabled={isLoading || stackLoading}>
+                {isLoading || stackLoading ? '🔐 Authenticating with Neon...' : '🚀 Sign In'}
               </Button>
             </form>
           </TabsContent>
@@ -125,8 +152,8 @@ export function AuthForm({ onAuth }: AuthFormProps) {
                 minLength={6}
                 required
               />
-              <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? 'Creating Account...' : 'Sign Up'}
+              <Button type="submit" className="w-full" disabled={isLoading || stackLoading}>
+                {isLoading || stackLoading ? '🔐 Creating Neon Account...' : '✨ Sign Up'}
               </Button>
             </form>
           </TabsContent>
@@ -139,6 +166,12 @@ export function AuthForm({ onAuth }: AuthFormProps) {
             </AlertDescription>
           </Alert>
         )}
+
+        <div className="mt-4 text-center">
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            🔒 Powered by Neon Auth & PostgreSQL
+          </p>
+        </div>
       </CardContent>
     </Card>
   );

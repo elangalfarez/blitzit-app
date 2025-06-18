@@ -1,4 +1,3 @@
-
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { resetDB, createDB } from '../helpers';
 import { db } from '../db';
@@ -17,23 +16,25 @@ describe('signUp', () => {
   beforeEach(createDB);
   afterEach(resetDB);
 
-  it('should create a new user', async () => {
+  it('should create a new user with Neon Auth integration', async () => {
     const result = await signUp(testInput);
 
     // Validate user fields
     expect(result.user.email).toEqual('test@example.com');
     expect(result.user.name).toEqual('Test User');
-    expect(result.user.password_hash).toEqual('hashed_password123');
+    expect(result.user.neon_auth_user_id).toBeDefined();
+    expect(result.user.neon_auth_user_id).toMatch(/^neon_\d+_/);
     expect(result.user.id).toBeDefined();
     expect(result.user.created_at).toBeInstanceOf(Date);
     expect(result.user.updated_at).toBeInstanceOf(Date);
 
-    // Validate token
+    // Validate response structure
+    expect(result.success).toBe(true);
     expect(result.token).toBeDefined();
-    expect(result.token).toMatch(/^token_\d+_\d+$/);
+    expect(result.token).toMatch(/^stack_token_\d+_\d+_[a-z0-9]+$/);
   });
 
-  it('should save user to database', async () => {
+  it('should save user to database with Neon Auth ID', async () => {
     const result = await signUp(testInput);
 
     const users = await db.select()
@@ -44,7 +45,8 @@ describe('signUp', () => {
     expect(users).toHaveLength(1);
     expect(users[0].email).toEqual('test@example.com');
     expect(users[0].name).toEqual('Test User');
-    expect(users[0].password_hash).toEqual('hashed_password123');
+    expect(users[0].neon_auth_user_id).toEqual(result.user.neon_auth_user_id);
+    expect(users[0].neon_auth_user_id).toMatch(/^neon_\d+_/);
     expect(users[0].created_at).toBeInstanceOf(Date);
     expect(users[0].updated_at).toBeInstanceOf(Date);
   });
@@ -68,7 +70,30 @@ describe('signUp', () => {
 
     expect(result.user.email).toEqual('another@test.com');
     expect(result.user.name).toEqual('Another User');
-    expect(result.user.password_hash).toEqual('hashed_differentpass');
-    expect(result.token).toMatch(/^token_\d+_\d+$/);
+    expect(result.user.neon_auth_user_id).toBeDefined();
+    expect(result.user.neon_auth_user_id).toMatch(/^neon_\d+_/);
+    expect(result.success).toBe(true);
+    expect(result.token).toMatch(/^stack_token_\d+_\d+_[a-z0-9]+$/);
+  });
+
+  it('should generate unique Neon Auth user IDs', async () => {
+    const input1: SignUpInput = {
+      email: 'user1@test.com',
+      password: 'password123',
+      name: 'User One'
+    };
+
+    const input2: SignUpInput = {
+      email: 'user2@test.com',
+      password: 'password123',
+      name: 'User Two'
+    };
+
+    const result1 = await signUp(input1);
+    const result2 = await signUp(input2);
+
+    expect(result1.user.neon_auth_user_id).not.toEqual(result2.user.neon_auth_user_id);
+    expect(result1.user.neon_auth_user_id).toMatch(/^neon_\d+_/);
+    expect(result2.user.neon_auth_user_id).toMatch(/^neon_\d+_/);
   });
 });

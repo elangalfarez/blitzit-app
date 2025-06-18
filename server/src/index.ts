@@ -6,6 +6,23 @@ import cors from 'cors';
 import superjson from 'superjson';
 import { z } from 'zod';
 
+// Verify Stack Auth environment variables
+const STACK_SECRET_SERVER_KEY = process.env['STACK_SECRET_SERVER_KEY'];
+const DATABASE_URL = process.env['DATABASE_URL'];
+
+if (!STACK_SECRET_SERVER_KEY) {
+  console.warn('STACK_SECRET_SERVER_KEY not found in environment variables');
+}
+
+if (!DATABASE_URL) {
+  console.warn('DATABASE_URL not found in environment variables');
+}
+
+console.log('Stack Auth configuration:', {
+  hasServerKey: !!STACK_SECRET_SERVER_KEY,
+  hasDbUrl: !!DATABASE_URL
+});
+
 // Import schemas
 import {
   signUpInputSchema,

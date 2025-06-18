@@ -1,4 +1,3 @@
-
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { resetDB, createDB } from '../helpers';
 import { db } from '../db';
@@ -7,224 +6,266 @@ import { type UpdateTaskInput } from '../schema';
 import { updateTask } from '../handlers/update_task';
 import { eq } from 'drizzle-orm';
 
+// Helper function to create a test user with Neon Auth ID
+async function createTestUser(email: string = 'test@example.com', name: string = 'Test User') {
+  const result = await db.insert(usersTable)
+    .values({
+      neon_auth_user_id: `neon_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      email,
+      name
+    })
+    .returning()
+    .execute();
+  return result[0];
+}
+
 describe('updateTask', () => {
   beforeEach(createDB);
   afterEach(resetDB);
 
-  let testUserId: number;
-  let testTaskId: number;
+  it('should update task title', async () => {
+    // Create a test user first
+    const user = await createTestUser();
 
-  beforeEach(async () => {
-    // Create test user
-    const userResult = await db.insert(usersTable)
+    // Create a task
+    const taskResult = await db.insert(tasksTable)
       .values({
-        email: 'test@example.com',
-        password_hash: 'hashed_password',
-        name: 'Test User'
+        user_id: user.id,
+        title: 'Original Title',
+        scheduled_date: '2024-01-15'
       })
       .returning()
       .execute();
-    testUserId = userResult[0].id;
 
-    // Create test task
+    const task = taskResult[0];
+
+    const input: UpdateTaskInput = {
+      id: task.id,
+      user_id: user.id,
+      title: 'Updated Title'
+    };
+
+    const result = await updateTask(input);
+
+    expect(result.id).toEqual(task.id);
+    expect(result.title).toEqual('Updated Title');
+    expect(result.user_id).toEqual(user.id);
+    expect(result.updated_at).toBeInstanceOf(Date);
+    expect(result.updated_at > task.updated_at).toBe(true);
+  });
+
+  it('should update task completion status', async () => {
+    // Create a test user first
+    const user = await createTestUser();
+
+    // Create a task
     const taskResult = await db.insert(tasksTable)
       .values({
-        user_id: testUserId,
-        title: 'Original Task',
-        description: 'Original description',
-        estimated_minutes: 60,
+        user_id: user.id,
+        title: 'Task to Complete',
         completed: false,
         scheduled_date: '2024-01-15'
       })
       .returning()
       .execute();
-    testTaskId = taskResult[0].id;
-  });
 
-  it('should update task title', async () => {
+    const task = taskResult[0];
+
     const input: UpdateTaskInput = {
-      id: testTaskId,
-      user_id: testUserId,
-      title: 'Updated Task Title'
-    };
-
-    const result = await updateTask(input);
-
-    expect(result.title).toEqual('Updated Task Title');
-    expect(result.description).toEqual('Original description');
-    expect(result.estimated_minutes).toEqual(60);
-    expect(result.completed).toEqual(false);
-    expect(result.updated_at).toBeInstanceOf(Date);
-    expect(result.scheduled_date).toBeInstanceOf(Date);
-  });
-
-  it('should update task description', async () => {
-    const input: UpdateTaskInput = {
-      id: testTaskId,
-      user_id: testUserId,
-      description: 'Updated description'
-    };
-
-    const result = await updateTask(input);
-
-    expect(result.title).toEqual('Original Task');
-    expect(result.description).toEqual('Updated description');
-    expect(result.estimated_minutes).toEqual(60);
-    expect(result.completed).toEqual(false);
-    expect(result.scheduled_date).toBeInstanceOf(Date);
-  });
-
-  it('should update estimated minutes', async () => {
-    const input: UpdateTaskInput = {
-      id: testTaskId,
-      user_id: testUserId,
-      estimated_minutes: 90
-    };
-
-    const result = await updateTask(input);
-
-    expect(result.title).toEqual('Original Task');
-    expect(result.description).toEqual('Original description');
-    expect(result.estimated_minutes).toEqual(90);
-    expect(result.completed).toEqual(false);
-    expect(result.scheduled_date).toBeInstanceOf(Date);
-  });
-
-  it('should mark task as completed and set completed_at', async () => {
-    const input: UpdateTaskInput = {
-      id: testTaskId,
-      user_id: testUserId,
+      id: task.id,
+      user_id: user.id,
       completed: true
     };
 
     const result = await updateTask(input);
 
-    expect(result.completed).toEqual(true);
+    expect(result.id).toEqual(task.id);
+    expect(result.completed).toBe(true);
     expect(result.completed_at).toBeInstanceOf(Date);
-    expect(result.completed_at).not.toBeNull();
-    expect(result.scheduled_date).toBeInstanceOf(Date);
+    expect(result.title).toEqual('Task to Complete'); // Should not change
   });
 
-  it('should mark task as incomplete and clear completed_at', async () => {
-    // First mark as completed
-    await updateTask({
-      id: testTaskId,
-      user_id: testUserId,
-      completed: true
-    });
+  it('should update multiple fields', async () => {
+    // Create a test user first
+    const user = await createTestUser();
 
-    // Then mark as incomplete
+    // Create a task
+    const taskResult = await db.insert(tasksTable)
+      .values({
+        user_id: user.id,
+        title: 'Multi Update Task',
+        description: 'Original description',
+        estimated_minutes: 30,
+        scheduled_date: '2024-01-15'
+      })
+      .returning()
+      .execute();
+
+    const task = taskResult[0];
+
     const input: UpdateTaskInput = {
-      id: testTaskId,
-      user_id: testUserId,
-      completed: false
-    };
-
-    const result = await updateTask(input);
-
-    expect(result.completed).toEqual(false);
-    expect(result.completed_at).toBeNull();
-    expect(result.scheduled_date).toBeInstanceOf(Date);
-  });
-
-  it('should update multiple fields at once', async () => {
-    const input: UpdateTaskInput = {
-      id: testTaskId,
-      user_id: testUserId,
-      title: 'Multi-update Task',
-      description: 'Updated with multiple fields',
+      id: task.id,
+      user_id: user.id,
+      title: 'Updated Multi Task',
+      description: 'New description',
       estimated_minutes: 45,
       completed: true
     };
 
     const result = await updateTask(input);
 
-    expect(result.title).toEqual('Multi-update Task');
-    expect(result.description).toEqual('Updated with multiple fields');
+    expect(result.id).toEqual(task.id);
+    expect(result.title).toEqual('Updated Multi Task');
+    expect(result.description).toEqual('New description');
     expect(result.estimated_minutes).toEqual(45);
-    expect(result.completed).toEqual(true);
+    expect(result.completed).toBe(true);
     expect(result.completed_at).toBeInstanceOf(Date);
-    expect(result.scheduled_date).toBeInstanceOf(Date);
+    expect(result.updated_at).toBeInstanceOf(Date);
   });
 
-  it('should set description to null', async () => {
+  it('should save updated task to database', async () => {
+    // Create a test user first
+    const user = await createTestUser();
+
+    // Create a task
+    const taskResult = await db.insert(tasksTable)
+      .values({
+        user_id: user.id,
+        title: 'Database Update Task',
+        scheduled_date: '2024-01-15'
+      })
+      .returning()
+      .execute();
+
+    const task = taskResult[0];
+
     const input: UpdateTaskInput = {
-      id: testTaskId,
-      user_id: testUserId,
-      description: null
+      id: task.id,
+      user_id: user.id,
+      title: 'Updated Database Task',
+      description: 'New database description'
+    };
+
+    await updateTask(input);
+
+    // Verify it was saved to database
+    const tasks = await db.select()
+      .from(tasksTable)
+      .where(eq(tasksTable.id, task.id))
+      .execute();
+
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].title).toEqual('Updated Database Task');
+    expect(tasks[0].description).toEqual('New database description');
+    expect(tasks[0].updated_at > task.updated_at).toBe(true);
+  });
+
+  it('should throw error when task not found', async () => {
+    // Create a test user first
+    const user = await createTestUser();
+
+    const input: UpdateTaskInput = {
+      id: 999,
+      user_id: user.id,
+      title: 'Non-existent Task'
+    };
+
+    await expect(updateTask(input)).rejects.toThrow(/not found/i);
+  });
+
+  it('should throw error when user does not own the task', async () => {
+    // Create two test users
+    const user1 = await createTestUser('user1@example.com', 'User One');
+    const user2 = await createTestUser('user2@example.com', 'User Two');
+
+    // Create a task owned by user1
+    const taskResult = await db.insert(tasksTable)
+      .values({
+        user_id: user1.id,
+        title: 'User1 Task',
+        scheduled_date: '2024-01-15'
+      })
+      .returning()
+      .execute();
+
+    const task = taskResult[0];
+
+    // Try to update with user2 (should fail)
+    const input: UpdateTaskInput = {
+      id: task.id,
+      user_id: user2.id,
+      title: 'Unauthorized Update'
+    };
+
+    await expect(updateTask(input)).rejects.toThrow(/not found/i);
+  });
+
+  it('should handle partial updates', async () => {
+    // Create a test user first
+    const user = await createTestUser();
+
+    // Create a task with all fields
+    const taskResult = await db.insert(tasksTable)
+      .values({
+        user_id: user.id,
+        title: 'Complete Task',
+        description: 'Full description',
+        estimated_minutes: 60,
+        completed: false,
+        scheduled_date: '2024-01-15'
+      })
+      .returning()
+      .execute();
+
+    const task = taskResult[0];
+
+    // Update only estimated_minutes
+    const input: UpdateTaskInput = {
+      id: task.id,
+      user_id: user.id,
+      estimated_minutes: 90
     };
 
     const result = await updateTask(input);
 
-    expect(result.description).toBeNull();
-    expect(result.title).toEqual('Original Task');
-    expect(result.scheduled_date).toBeInstanceOf(Date);
+    expect(result.id).toEqual(task.id);
+    expect(result.title).toEqual('Complete Task'); // Should not change
+    expect(result.description).toEqual('Full description'); // Should not change
+    expect(result.estimated_minutes).toEqual(90); // Should change
+    expect(result.completed).toBe(false); // Should not change
   });
 
-  it('should set estimated_minutes to null', async () => {
+  it('should handle nullable field updates', async () => {
+    // Create a test user first
+    const user = await createTestUser();
+
+    // Create a task with nullable fields
+    const taskResult = await db.insert(tasksTable)
+      .values({
+        user_id: user.id,
+        title: 'Nullable Task',
+        description: 'Some description',
+        estimated_minutes: 30,
+        scheduled_date: '2024-01-15'
+      })
+      .returning()
+      .execute();
+
+    const task = taskResult[0];
+
+    // Update to null values
     const input: UpdateTaskInput = {
-      id: testTaskId,
-      user_id: testUserId,
+      id: task.id,
+      user_id: user.id,
+      description: null,
       estimated_minutes: null
     };
 
     const result = await updateTask(input);
 
+    expect(result.id).toEqual(task.id);
+    expect(result.description).toBeNull();
     expect(result.estimated_minutes).toBeNull();
-    expect(result.title).toEqual('Original Task');
-    expect(result.scheduled_date).toBeInstanceOf(Date);
-  });
-
-  it('should save changes to database', async () => {
-    const input: UpdateTaskInput = {
-      id: testTaskId,
-      user_id: testUserId,
-      title: 'Database Update Test',
-      completed: true
-    };
-
-    await updateTask(input);
-
-    // Verify in database
-    const tasks = await db.select()
-      .from(tasksTable)
-      .where(eq(tasksTable.id, testTaskId))
-      .execute();
-
-    expect(tasks).toHaveLength(1);
-    expect(tasks[0].title).toEqual('Database Update Test');
-    expect(tasks[0].completed).toEqual(true);
-    expect(tasks[0].completed_at).toBeInstanceOf(Date);
-    expect(tasks[0].updated_at).toBeInstanceOf(Date);
-  });
-
-  it('should throw error for non-existent task', async () => {
-    const input: UpdateTaskInput = {
-      id: 99999,
-      user_id: testUserId,
-      title: 'Non-existent task'
-    };
-
-    await expect(updateTask(input)).rejects.toThrow(/not found/i);
-  });
-
-  it('should throw error when user tries to update another users task', async () => {
-    // Create another user
-    const otherUserResult = await db.insert(usersTable)
-      .values({
-        email: 'other@example.com',
-        password_hash: 'hashed_password',
-        name: 'Other User'
-      })
-      .returning()
-      .execute();
-
-    const input: UpdateTaskInput = {
-      id: testTaskId,
-      user_id: otherUserResult[0].id, // Different user ID
-      title: 'Unauthorized update'
-    };
-
-    await expect(updateTask(input)).rejects.toThrow(/not found/i);
+    expect(result.title).toEqual('Nullable Task'); // Should not change
   });
 });

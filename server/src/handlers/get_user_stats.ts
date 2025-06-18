@@ -33,16 +33,29 @@ export const getUserStats = async (input: GetUserStatsInput): Promise<UserStats>
       .execute();
 
     // Get task counts for the date
-    const taskCountsResult = await db
+    const totalTasksResult = await db
       .select({
-        total_tasks: count(),
-        completed_tasks: count(tasksTable.completed_at)
+        total_tasks: count()
       })
       .from(tasksTable)
       .where(
         and(
           eq(tasksTable.user_id, input.user_id),
           eq(tasksTable.scheduled_date, targetDate.toISOString().split('T')[0])
+        )
+      )
+      .execute();
+
+    const completedTasksResult = await db
+      .select({
+        completed_tasks: count()
+      })
+      .from(tasksTable)
+      .where(
+        and(
+          eq(tasksTable.user_id, input.user_id),
+          eq(tasksTable.scheduled_date, targetDate.toISOString().split('T')[0]),
+          eq(tasksTable.completed, true)
         )
       )
       .execute();
@@ -64,9 +77,8 @@ export const getUserStats = async (input: GetUserStatsInput): Promise<UserStats>
     const totalFocusMinutes = focusMinutesResult[0]?.total_minutes ? 
       parseInt(focusMinutesResult[0].total_minutes) : 0;
     
-    const taskCounts = taskCountsResult[0];
-    const totalTasksCount = taskCounts?.total_tasks || 0;
-    const completedTasksCount = taskCounts?.completed_tasks || 0;
+    const totalTasksCount = totalTasksResult[0]?.total_tasks || 0;
+    const completedTasksCount = completedTasksResult[0]?.completed_tasks || 0;
     
     const activeSession = activeSessionResult.length > 0 ? activeSessionResult[0] : null;
 

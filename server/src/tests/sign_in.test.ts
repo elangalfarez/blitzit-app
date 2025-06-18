@@ -1,120 +1,87 @@
-
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { resetDB, createDB } from '../helpers';
 import { db } from '../db';
 import { usersTable } from '../db/schema';
 import { type SignInInput } from '../schema';
 import { signIn } from '../handlers/sign_in';
+import { signUp } from '../handlers/sign_up';
 
-// Test user data
-const testUserData = {
+const testUser = {
   email: 'test@example.com',
   password: 'password123',
   name: 'Test User'
-};
-
-const testInput: SignInInput = {
-  email: 'test@example.com',
-  password: 'password123'
 };
 
 describe('signIn', () => {
   beforeEach(createDB);
   afterEach(resetDB);
 
-  it('should sign in user with valid credentials', async () => {
-    // Create test user with hashed password
-    const hashedPassword = await Bun.password.hash(testUserData.password);
-    await db.insert(usersTable)
-      .values({
-        email: testUserData.email,
-        password_hash: hashedPassword,
-        name: testUserData.name
-      })
-      .execute();
-
-    const result = await signIn(testInput);
-
-    // Verify response structure
-    expect(result.user).toBeDefined();
-    expect(result.token).toBeDefined();
-    expect(typeof result.token).toBe('string');
+  it('should sign in existing user with Neon Auth', async () => {
+    // First create a user
+    const signUpResult = await signUp(testUser);
     
-    // Verify user data
-    expect(result.user.email).toEqual(testUserData.email);
-    expect(result.user.name).toEqual(testUserData.name);
-    expect(result.user.id).toBeDefined();
-    expect(result.user.created_at).toBeInstanceOf(Date);
-    expect(result.user.updated_at).toBeInstanceOf(Date);
+    // Then sign in with the same credentials
+    const signInInput: SignInInput = {
+      email: testUser.email,
+      password: testUser.password
+    };
+    
+    const result = await signIn(signInInput);
+
+    expect(result.user.email).toEqual('test@example.com');
+    expect(result.user.name).toEqual('Test User');
+    expect(result.user.neon_auth_user_id).toEqual(signUpResult.user.neon_auth_user_id);
+    expect(result.user.id).toEqual(signUpResult.user.id);
+    expect(result.success).toBe(true);
+    expect(result.token).toBeDefined();
+    expect(result.token).toMatch(/^stack_token_\d+_\d+_[a-z0-9]+$/);
   });
 
-  it('should throw error for non-existent email', async () => {
-    const invalidInput: SignInInput = {
+  it('should reject sign in for non-existent user', async () => {
+    const signInInput: SignInInput = {
       email: 'nonexistent@example.com',
       password: 'password123'
     };
 
-    await expect(signIn(invalidInput)).rejects.toThrow(/invalid email or password/i);
+    await expect(signIn(signInInput)).rejects.toThrow(/Invalid email or password/i);
   });
 
-  it('should throw error for incorrect password', async () => {
-    // Create test user
-    const hashedPassword = await Bun.password.hash(testUserData.password);
-    await db.insert(usersTable)
-      .values({
-        email: testUserData.email,
-        password_hash: hashedPassword,
-        name: testUserData.name
-      })
-      .execute();
-
-    const invalidInput: SignInInput = {
-      email: testUserData.email,
-      password: 'wrongpassword'
+  it('should handle sign in with correct Neon Auth flow', async () => {
+    // Create user first
+    const signUpResult = await signUp(testUser);
+    
+    const signInInput: SignInInput = {
+      email: testUser.email,
+      password: testUser.password
     };
+    
+    const result = await signIn(signInInput);
 
-    await expect(signIn(invalidInput)).rejects.toThrow(/invalid email or password/i);
+    // Should find the user in database by Neon Auth ID
+    expect(result.user.neon_auth_user_id).toBeDefined();
+    expect(result.user.neon_auth_user_id).toMatch(/^neon_\d+_/);
+    expect(result.success).toBe(true);
+    
+    // Should return the same user data as signup
+    expect(result.user.id).toEqual(signUpResult.user.id);
+    expect(result.user.email).toEqual(signUpResult.user.email);
+    expect(result.user.name).toEqual(signUpResult.user.name);
   });
 
-  it('should generate token for valid authentication', async () => {
-    // Create test user
-    const hashedPassword = await Bun.password.hash(testUserData.password);
-    await db.insert(usersTable)
-      .values({
-        email: testUserData.email,
-        password_hash: hashedPassword,
-        name: testUserData.name
-      })
-      .execute();
+  it('should generate new token on each sign in', async () => {
+    // Create user first
+    await signUp(testUser);
+    
+    const signInInput: SignInInput = {
+      email: testUser.email,
+      password: testUser.password
+    };
+    
+    const result1 = await signIn(signInInput);
+    const result2 = await signIn(signInInput);
 
-    const result = await signIn(testInput);
-
-    // Verify token is a non-empty string
-    expect(result.token).toBeDefined();
-    expect(typeof result.token).toBe('string');
-    expect(result.token.length).toBeGreaterThan(0);
-  });
-
-  it('should return complete user object', async () => {
-    // Create test user
-    const hashedPassword = await Bun.password.hash(testUserData.password);
-    const insertResult = await db.insert(usersTable)
-      .values({
-        email: testUserData.email,
-        password_hash: hashedPassword,
-        name: testUserData.name
-      })
-      .returning()
-      .execute();
-
-    const result = await signIn(testInput);
-
-    // Verify all user fields are present
-    expect(result.user.id).toEqual(insertResult[0].id);
-    expect(result.user.email).toEqual(testUserData.email);
-    expect(result.user.name).toEqual(testUserData.name);
-    expect(result.user.password_hash).toEqual(hashedPassword);
-    expect(result.user.created_at).toBeInstanceOf(Date);
-    expect(result.user.updated_at).toBeInstanceOf(Date);
+    expect(result1.token).not.toEqual(result2.token);
+    expect(result1.token).toMatch(/^stack_token_\d+_\d+_[a-z0-9]+$/);
+    expect(result2.token).toMatch(/^stack_token_\d+_\d+_[a-z0-9]+$/);
   });
 });

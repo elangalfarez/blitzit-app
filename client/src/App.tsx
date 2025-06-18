@@ -1,15 +1,16 @@
-
 import { useState, useEffect, useCallback } from 'react';
 import { trpc } from '@/utils/trpc';
 import { AuthForm } from '@/components/AuthForm';
 import { Dashboard } from '@/components/Dashboard';
 import { FocusSession } from '@/components/FocusSession';
+import { StackAuthProvider, useStackAuth } from '@/components/StackAuthProvider';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Moon, Sun, Zap } from 'lucide-react';
+import { Moon, Sun, Zap, Database } from 'lucide-react';
 import type { User, Task, FocusSession as FocusSessionType, UserStats } from '../../server/src/schema';
 
-function App() {
+function AppContent() {
+  const { signOut: stackSignOut } = useStackAuth();
   const [user, setUser] = useState<User | null>(null);
   const [activeFocusSession, setActiveFocusSession] = useState<FocusSessionType | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -77,12 +78,14 @@ function App() {
   };
 
   const handleLogout = () => {
+    // Sign out from Stack Auth first
+    stackSignOut();
+    
+    // Clear local state
     setUser(null);
     setTasks([]);
     setUserStats(null);
     setActiveFocusSession(null);
-    localStorage.removeItem('blitzit_user');
-    localStorage.removeItem('blitzit_token');
   };
 
   const handleTaskUpdate = (updatedTask: Task) => {
@@ -118,14 +121,22 @@ function App() {
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 dark:from-gray-900 dark:via-blue-900 dark:to-indigo-900 flex items-center justify-center p-4">
         <div className="w-full max-w-md">
           <div className="text-center mb-8">
             <div className="flex items-center justify-center gap-2 mb-4">
-              <Zap className="h-8 w-8 text-blue-600 dark:text-blue-400" />
-              <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Blitzit</h1>
+              <div className="relative">
+                <Zap className="h-8 w-8 text-blue-600 dark:text-blue-400" />
+                <Database className="h-4 w-4 text-green-500 absolute -bottom-1 -right-1" />
+              </div>
+              <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 dark:from-blue-400 dark:to-purple-400 bg-clip-text text-transparent">
+                Blitzit
+              </h1>
             </div>
             <p className="text-gray-600 dark:text-gray-400">Focus. Complete. Achieve.</p>
+            <p className="text-sm text-blue-600 dark:text-blue-400 mt-2">
+              🔒 Secured by Neon Auth & PostgreSQL
+            </p>
           </div>
           <AuthForm onAuth={handleAuth} />
           <Button
@@ -148,8 +159,14 @@ function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center gap-3">
-              <Zap className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+              <div className="relative">
+                <Zap className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+                <Database className="h-3 w-3 text-green-500 absolute -bottom-0.5 -right-0.5" />
+              </div>
               <h1 className="text-xl font-bold text-gray-900 dark:text-white">Blitzit</h1>
+              <Badge variant="outline" className="hidden sm:flex text-xs">
+                🔒 Neon Auth
+              </Badge>
               {userStats && (
                 <Badge variant="secondary" className="hidden sm:flex">
                   🔥 {userStats.total_focus_minutes}min focused today
@@ -158,7 +175,10 @@ function App() {
             </div>
             <div className="flex items-center gap-2">
               <span className="text-sm text-gray-600 dark:text-gray-400 hidden sm:block">
-                Hi, {user.name}!
+                Hi, {user.name}! 
+                <span className="text-xs text-blue-500 ml-1">
+                  (ID: {user.neon_auth_user_id.slice(-8)})
+                </span>
               </span>
               <Button
                 variant="ghost"
@@ -198,6 +218,14 @@ function App() {
         />
       )}
     </div>
+  );
+}
+
+function App() {
+  return (
+    <StackAuthProvider>
+      <AppContent />
+    </StackAuthProvider>
   );
 }
 
