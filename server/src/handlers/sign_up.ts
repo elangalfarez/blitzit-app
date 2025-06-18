@@ -7,7 +7,7 @@ export const signUp = async (input: SignUpInput): Promise<AuthResponse> => {
   try {
     // For now, we'll simulate the Neon Auth user creation
     // In a real implementation, this would use the actual Neon Auth SDK
-    const neonAuthUserId = `neon_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const neonAuthUserId = session.user.id;
 
     // Create user record in our database with the Neon Auth user ID
     const result = await db.insert(usersTable)
