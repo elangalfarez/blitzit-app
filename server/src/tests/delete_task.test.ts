@@ -1,151 +1,171 @@
+
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { resetDB, createDB } from '../helpers';
 import { db } from '../db';
 import { usersTable, tasksTable } from '../db/schema';
+import { type DeleteTaskInput } from '../schema';
 import { deleteTask } from '../handlers/delete_task';
 import { eq } from 'drizzle-orm';
 
-// Helper function to create a test user with Neon Auth ID
-async function createTestUser(email: string = 'test@example.com', name: string = 'Test User') {
-  const result = await db.insert(usersTable)
-    .values({
-      neon_auth_user_id: `neon_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      email,
-      name
-    })
-    .returning()
-    .execute();
-  return result[0];
-}
+// Test data
+const testUser = {
+  neon_auth_user_id: 'test-neon-auth-id',
+  email: 'test@example.com',
+  name: 'Test User'
+};
+
+const testTask = {
+  title: 'Test Task',
+  description: 'A task for testing',
+  priority: 'medium' as const,
+  completed: false
+};
+
+const testInput: DeleteTaskInput = {
+  id: 1 // Will be set to actual task ID in tests
+};
 
 describe('deleteTask', () => {
   beforeEach(createDB);
   afterEach(resetDB);
 
   it('should delete a task successfully', async () => {
-    // Create a test user first
-    const user = await createTestUser();
+    // Create user
+    const userResult = await db.insert(usersTable)
+      .values(testUser)
+      .returning()
+      .execute();
+    const userId = userResult[0].id;
 
-    // Create a task
+    // Create task
     const taskResult = await db.insert(tasksTable)
       .values({
-        user_id: user.id,
-        title: 'Task to Delete',
-        scheduled_date: '2024-01-15'
+        ...testTask,
+        user_id: userId
       })
       .returning()
       .execute();
-
-    const task = taskResult[0];
+    const taskId = taskResult[0].id;
 
     // Delete the task
-    await deleteTask(task.id, user.id);
+    const result = await deleteTask({ id: taskId }, userId);
 
-    // Verify it was deleted
+    // Verify deletion was successful
+    expect(result.success).toBe(true);
+
+    // Verify task no longer exists in database
     const tasks = await db.select()
       .from(tasksTable)
-      .where(eq(tasksTable.id, task.id))
+      .where(eq(tasksTable.id, taskId))
       .execute();
 
     expect(tasks).toHaveLength(0);
   });
 
-  it('should throw error when task not found', async () => {
-    // Create a test user first
-    const user = await createTestUser();
+  it('should return false when task does not exist', async () => {
+    // Create user
+    const userResult = await db.insert(usersTable)
+      .values(testUser)
+      .returning()
+      .execute();
+    const userId = userResult[0].id;
 
     // Try to delete non-existent task
-    await expect(deleteTask(999, user.id)).rejects.toThrow(/not found|access denied/i);
+    const result = await deleteTask({ id: 999 }, userId);
+
+    expect(result.success).toBe(false);
   });
 
-  it('should throw error when user does not own the task', async () => {
-    // Create two test users
-    const user1 = await createTestUser('user1@example.com', 'User One');
-    const user2 = await createTestUser('user2@example.com', 'User Two');
+  it('should return false when task belongs to different user', async () => {
+    // Create first user
+    const userResult1 = await db.insert(usersTable)
+      .values(testUser)
+      .returning()
+      .execute();
+    const userId1 = userResult1[0].id;
 
-    // Create a task owned by user1
-    const taskResult = await db.insert(tasksTable)
+    // Create second user
+    const userResult2 = await db.insert(usersTable)
       .values({
-        user_id: user1.id,
-        title: 'User1 Task',
-        scheduled_date: '2024-01-15'
+        ...testUser,
+        neon_auth_user_id: 'different-neon-auth-id',
+        email: 'different@example.com'
       })
       .returning()
       .execute();
+    const userId2 = userResult2[0].id;
 
-    const task = taskResult[0];
+    // Create task owned by first user
+    const taskResult = await db.insert(tasksTable)
+      .values({
+        ...testTask,
+        user_id: userId1
+      })
+      .returning()
+      .execute();
+    const taskId = taskResult[0].id;
 
-    // Try to delete with user2 (should fail)
-    await expect(deleteTask(task.id, user2.id)).rejects.toThrow(/not found|access denied/i);
+    // Try to delete task as second user
+    const result = await deleteTask({ id: taskId }, userId2);
+
+    expect(result.success).toBe(false);
+
+    // Verify task still exists
+    const tasks = await db.select()
+      .from(tasksTable)
+      .where(eq(tasksTable.id, taskId))
+      .execute();
+
+    expect(tasks).toHaveLength(1);
   });
 
-  it('should not affect other tasks', async () => {
-    // Create a test user first
-    const user = await createTestUser();
+  it('should not affect other tasks when deleting', async () => {
+    // Create user
+    const userResult = await db.insert(usersTable)
+      .values(testUser)
+      .returning()
+      .execute();
+    const userId = userResult[0].id;
 
     // Create multiple tasks
     const task1Result = await db.insert(tasksTable)
       .values({
-        user_id: user.id,
+        ...testTask,
         title: 'Task 1',
-        scheduled_date: '2024-01-15'
+        user_id: userId
       })
       .returning()
       .execute();
 
     const task2Result = await db.insert(tasksTable)
       .values({
-        user_id: user.id,
+        ...testTask,
         title: 'Task 2',
-        scheduled_date: '2024-01-15'
+        user_id: userId
       })
       .returning()
       .execute();
 
-    const task1 = task1Result[0];
-    const task2 = task2Result[0];
+    // Delete first task
+    const result = await deleteTask({ id: task1Result[0].id }, userId);
 
-    // Delete only task1
-    await deleteTask(task1.id, user.id);
+    expect(result.success).toBe(true);
 
-    // Verify task1 is deleted but task2 remains
-    const remainingTasks = await db.select()
+    // Verify first task is deleted
+    const deletedTask = await db.select()
       .from(tasksTable)
-      .where(eq(tasksTable.user_id, user.id))
+      .where(eq(tasksTable.id, task1Result[0].id))
       .execute();
 
-    expect(remainingTasks).toHaveLength(1);
-    expect(remainingTasks[0].id).toEqual(task2.id);
-    expect(remainingTasks[0].title).toEqual('Task 2');
-  });
+    expect(deletedTask).toHaveLength(0);
 
-  it('should handle cascade deletion when user is deleted', async () => {
-    // Create a test user first
-    const user = await createTestUser();
-
-    // Create a task
-    const taskResult = await db.insert(tasksTable)
-      .values({
-        user_id: user.id,
-        title: 'Task to be cascaded',
-        scheduled_date: '2024-01-15'
-      })
-      .returning()
-      .execute();
-
-    const task = taskResult[0];
-
-    // Delete the user (should cascade to tasks)
-    await db.delete(usersTable)
-      .where(eq(usersTable.id, user.id))
-      .execute();
-
-    // Verify task was also deleted
-    const tasks = await db.select()
+    // Verify second task still exists
+    const remainingTask = await db.select()
       .from(tasksTable)
-      .where(eq(tasksTable.id, task.id))
+      .where(eq(tasksTable.id, task2Result[0].id))
       .execute();
 
-    expect(tasks).toHaveLength(0);
+    expect(remainingTask).toHaveLength(1);
+    expect(remainingTask[0].title).toBe('Task 2');
   });
 });

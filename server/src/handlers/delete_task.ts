@@ -1,29 +1,22 @@
+
 import { db } from '../db';
 import { tasksTable } from '../db/schema';
+import { type DeleteTaskInput } from '../schema';
 import { eq, and } from 'drizzle-orm';
 
-export const deleteTask = async (taskId: number, userId: number): Promise<void> => {
+export const deleteTask = async (input: DeleteTaskInput, userId: number): Promise<{ success: boolean }> => {
   try {
-    // First check if task exists and belongs to user
-    const existingTasks = await db.select()
-      .from(tasksTable)
+    // Delete the task, ensuring it belongs to the user
+    const result = await db.delete(tasksTable)
       .where(and(
-        eq(tasksTable.id, taskId),
+        eq(tasksTable.id, input.id),
         eq(tasksTable.user_id, userId)
       ))
+      .returning()
       .execute();
 
-    if (existingTasks.length === 0) {
-      throw new Error('Task not found or access denied');
-    }
-
-    // Delete the task
-    await db.delete(tasksTable)
-      .where(and(
-        eq(tasksTable.id, taskId),
-        eq(tasksTable.user_id, userId)
-      ))
-      .execute();
+    // Return success based on whether a task was actually deleted
+    return { success: result.length > 0 };
   } catch (error) {
     console.error('Task deletion failed:', error);
     throw error;

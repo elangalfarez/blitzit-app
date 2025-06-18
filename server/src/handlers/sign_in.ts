@@ -1,77 +1,86 @@
+
 import { db } from '../db';
 import { usersTable } from '../db/schema';
-import { type SignInInput, type AuthResponse } from '../schema';
 import { eq } from 'drizzle-orm';
+import { type SignInInput, type AuthResponse } from '../schema';
 
-// Simulated Stack Auth integration
-class StackAuth {
-  async signInWithCredential(credentials: { email: string; password: string }) {
-    // In real implementation, this would call Stack Auth API
-    // For demo purposes, we'll find existing user by email and simulate auth
-    const users = await db.select()
-      .from(usersTable)
-      .where(eq(usersTable.email, credentials.email))
-      .execute();
-
-    if (users.length === 0) {
-      return { success: false, user: null };
+// Mock Stack Auth implementation - replace with actual @stackframe/stack when available
+class MockStackAuth {
+  async signInWithCredentials(credentials: { email: string; password: string }) {
+    // Mock validation - in real implementation this would call Stack Auth API
+    if (!credentials.email || !credentials.password) {
+      return { success: false, error: 'Invalid credentials' };
     }
-
-    const user = users[0];
     
+    // Mock successful response - replace with actual Stack Auth response structure
     return {
       success: true,
       user: {
-        id: user.neon_auth_user_id,
-        primaryEmail: user.email,
-        displayName: user.name
-      }
+        id: `stack_user_${credentials.email.replace('@', '_').replace('.', '_')}`, // Consistent ID based on email
+        primaryEmail: credentials.email,
+        displayName: 'User',
+      },
+      accessToken: `mock_token_${Date.now()}`,
     };
   }
 }
 
-const stack = new StackAuth();
+// TODO: Replace with actual Stack initialization when @stackframe/stack is available
+// const stack = new StackServerApp({
+//   tokenStore: 'nextjs-cookie',
+// });
+const stack = new MockStackAuth();
 
 export const signIn = async (input: SignInInput): Promise<AuthResponse> => {
   try {
-    // Use Stack Auth to authenticate the user
-    const authResult = await stack.signInWithCredential({
+    // Sign in user with Stack Auth
+    const authResult = await stack.signInWithCredentials({
       email: input.email,
       password: input.password,
     });
 
     if (!authResult.success || !authResult.user) {
-      throw new Error('Invalid email or password');
+      throw new Error('Invalid credentials');
     }
 
-    const neonAuthUserId = authResult.user.id;
-
-    // Find user in our database
-    const users = await db.select()
+    // Get the Stack Auth user
+    const stackUser = authResult.user;
+    
+    // Check if user exists in our database by email (since Stack user might be consistent)
+    const existingUsers = await db.select()
       .from(usersTable)
-      .where(eq(usersTable.neon_auth_user_id, neonAuthUserId))
+      .where(eq(usersTable.email, stackUser.primaryEmail))
       .execute();
 
-    if (users.length === 0) {
-      throw new Error('User not found in local database');
+    let user;
+    if (existingUsers.length === 0) {
+      // User doesn't exist in our database, create them
+      const newUser = await db.insert(usersTable)
+        .values({
+          neon_auth_user_id: stackUser.id,
+          email: stackUser.primaryEmail || input.email,
+          name: stackUser.displayName || 'User',
+        })
+        .returning()
+        .execute();
+      
+      user = newUser[0];
+    } else {
+      // Update the existing user's neon_auth_user_id if it's different
+      user = existingUsers[0];
+      if (user.neon_auth_user_id !== stackUser.id) {
+        const updatedUser = await db.update(usersTable)
+          .set({ neon_auth_user_id: stackUser.id })
+          .where(eq(usersTable.id, user.id))
+          .returning()
+          .execute();
+        user = updatedUser[0];
+      }
     }
 
-    const user = users[0];
-
-    // Generate token (in real app, Stack Auth would handle this)
-    const token = `stack_token_${user.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
     return {
-      user: {
-        id: user.id,
-        neon_auth_user_id: user.neon_auth_user_id,
-        email: user.email,
-        name: user.name,
-        created_at: user.created_at,
-        updated_at: user.updated_at
-      },
-      success: true,
-      token
+      user,
+      token: authResult.accessToken,
     };
   } catch (error) {
     console.error('Sign in failed:', error);

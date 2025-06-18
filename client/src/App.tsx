@@ -1,231 +1,245 @@
+
 import { useState, useEffect, useCallback } from 'react';
-import { trpc } from '@/utils/trpc';
-import { AuthForm } from '@/components/AuthForm';
-import { Dashboard } from '@/components/Dashboard';
-import { FocusSession } from '@/components/FocusSession';
-import { StackAuthProvider, useStackAuth } from '@/components/StackAuthProvider';
+import { AuthForm } from './components/AuthForm';
+import { TaskManager } from './components/TaskManager';
+import { FocusSession } from './components/FocusSession';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
-import { Moon, Sun, Zap, Database } from 'lucide-react';
-import type { User, Task, FocusSession as FocusSessionType, UserStats } from '../../server/src/schema';
+import { trpc } from '@/utils/trpc';
+import type { User, UserStats, Task, FocusSession as FocusSessionType } from '../../server/src/schema';
 
-function AppContent() {
-  const { signOut: stackSignOut } = useStackAuth();
+function App() {
   const [user, setUser] = useState<User | null>(null);
-  const [activeFocusSession, setActiveFocusSession] = useState<FocusSessionType | null>(null);
-  const [tasks, setTasks] = useState<Task[]>([]);
   const [userStats, setUserStats] = useState<UserStats | null>(null);
-  const [darkMode, setDarkMode] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('darkMode') === 'true' || 
-             window.matchMedia('(prefers-color-scheme: dark)').matches;
-    }
-    return false;
-  });
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [currentSession, setCurrentSession] = useState<FocusSessionType | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(false);
 
-  // Load user from localStorage on mount
-  useEffect(() => {
-    const savedUser = localStorage.getItem('blitzit_user');
-    if (savedUser) {
-      try {
-        setUser(JSON.parse(savedUser));
-      } catch (error) {
-        console.error('Failed to parse saved user:', error);
-        localStorage.removeItem('blitzit_user');
-      }
-    }
-  }, []);
-
-  // Apply dark mode class to document
-  useEffect(() => {
-    if (darkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-    localStorage.setItem('darkMode', darkMode.toString());
-  }, [darkMode]);
-
-  // Load data when user is authenticated
+  // Load user data
   const loadUserData = useCallback(async () => {
     if (!user) return;
-
+    
     try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      const [tasksData, statsData] = await Promise.all([
-        trpc.getTasks.query({ user_id: user.id, date: today }),
-        trpc.getUserStats.query({ user_id: user.id, date: today })
+      const [statsData, tasksData] = await Promise.all([
+        trpc.getUserStats.query(),
+        trpc.getTasks.query()
       ]);
-
-      setTasks(tasksData);
       setUserStats(statsData);
-      setActiveFocusSession(statsData.active_session);
+      setTasks(tasksData);
     } catch (error) {
       console.error('Failed to load user data:', error);
     }
   }, [user]);
 
+  // Check authentication status on mount
   useEffect(() => {
-    loadUserData();
-  }, [loadUserData]);
+    const checkAuthStatus = async () => {
+      try {
+        // Try to get current user from backend
+        const userData = await trpc.getCurrentUser.query();
+        setUser(userData);
+      } catch (error) {
+        console.error('Auth check failed:', error);
+        // User not authenticated, will show auth form
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-  const handleAuth = (authData: { user: User; token: string }) => {
-    setUser(authData.user);
-    localStorage.setItem('blitzit_user', JSON.stringify(authData.user));
-    localStorage.setItem('blitzit_token', authData.token);
+    checkAuthStatus();
+  }, []);
+
+  // Load user data when user changes
+  useEffect(() => {
+    if (user) {
+      loadUserData();
+    }
+  }, [user, loadUserData]);
+
+  const handleSignOut = async () => {
+    setAuthLoading(true);
+    try {
+      // Clear local state
+      setUser(null);
+      setUserStats(null);
+      setTasks([]);
+      setCurrentSession(null);
+      
+      // Reload page to clear any cached auth state
+      window.location.reload();
+    } catch (error) {
+      console.error('Sign out failed:', error);
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
-  const handleLogout = () => {
-    // Sign out from Stack Auth first
-    stackSignOut();
-    
-    // Clear local state
-    setUser(null);
-    setTasks([]);
-    setUserStats(null);
-    setActiveFocusSession(null);
+  const handleTaskCreate = (task: Task) => {
+    setTasks((prev: Task[]) => [...prev, task]);
+    loadUserData(); // Refresh stats
   };
 
   const handleTaskUpdate = (updatedTask: Task) => {
-    setTasks((prev: Task[]) => 
-      prev.map((task: Task) => task.id === updatedTask.id ? updatedTask : task)
+    setTasks((prev: Task[]) =>
+      prev.map((t: Task) => (t.id === updatedTask.id ? updatedTask : t))
     );
-    // Reload stats to reflect changes
-    loadUserData();
-  };
-
-  const handleTaskCreate = (newTask: Task) => {
-    setTasks((prev: Task[]) => [...prev, newTask]);
-    loadUserData();
+    loadUserData(); // Refresh stats
   };
 
   const handleTaskDelete = (taskId: number) => {
-    setTasks((prev: Task[]) => prev.filter((task: Task) => task.id !== taskId));
-    loadUserData();
+    setTasks((prev: Task[]) => prev.filter((t: Task) => t.id !== taskId));
+    loadUserData(); // Refresh stats
   };
 
   const handleFocusSessionStart = (session: FocusSessionType) => {
-    setActiveFocusSession(session);
+    setCurrentSession(session);
   };
 
-  const handleFocusSessionEnd = () => {
-    setActiveFocusSession(null);
+  const handleSessionEnd = () => {
+    setCurrentSession(null);
     loadUserData(); // Refresh stats and tasks
   };
 
-  const toggleDarkMode = () => {
-    setDarkMode((prev: boolean) => !prev);
-  };
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading Blitzit...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 dark:from-gray-900 dark:via-blue-900 dark:to-indigo-900 flex items-center justify-center p-4">
-        <div className="w-full max-w-md">
-          <div className="text-center mb-8">
-            <div className="flex items-center justify-center gap-2 mb-4">
-              <div className="relative">
-                <Zap className="h-8 w-8 text-blue-600 dark:text-blue-400" />
-                <Database className="h-4 w-4 text-green-500 absolute -bottom-1 -right-1" />
-              </div>
-              <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 dark:from-blue-400 dark:to-purple-400 bg-clip-text text-transparent">
-                Blitzit
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+        <div className="container mx-auto px-4 py-8">
+          <div className="max-w-md mx-auto">
+            <div className="text-center mb-8">
+              <h1 className="text-4xl font-bold text-gray-900 mb-2">
+                ⚡ Blitzit
               </h1>
+              <p className="text-gray-600">
+                Lightning-fast productivity with focused work sessions
+              </p>
             </div>
-            <p className="text-gray-600 dark:text-gray-400">Focus. Complete. Achieve.</p>
-            <p className="text-sm text-blue-600 dark:text-blue-400 mt-2">
-              🔒 Secured by Neon Auth & PostgreSQL
-            </p>
+            <AuthForm onAuthSuccess={(userData: User) => setUser(userData)} />
           </div>
-          <AuthForm onAuth={handleAuth} />
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={toggleDarkMode}
-            className="fixed top-4 right-4"
-          >
-            {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-          </Button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors">
-      {/* Header */}
-      <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center gap-3">
-              <div className="relative">
-                <Zap className="h-6 w-6 text-blue-600 dark:text-blue-400" />
-                <Database className="h-3 w-3 text-green-500 absolute -bottom-0.5 -right-0.5" />
-              </div>
-              <h1 className="text-xl font-bold text-gray-900 dark:text-white">Blitzit</h1>
-              <Badge variant="outline" className="hidden sm:flex text-xs">
-                🔒 Neon Auth
-              </Badge>
-              {userStats && (
-                <Badge variant="secondary" className="hidden sm:flex">
-                  🔥 {userStats.total_focus_minutes}min focused today
+    <>
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+        <div className="container mx-auto px-4 py-8">
+          {/* Header */}
+          <div className="flex justify-between items-center mb-8">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
+                ⚡ Blitzit
+                <Badge variant="secondary" className="text-xs">
+                  Focus Mode
                 </Badge>
-              )}
+              </h1>
+              <p className="text-gray-600 mt-1">
+                Welcome back, {user.name}! 👋
+              </p>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-600 dark:text-gray-400 hidden sm:block">
-                Hi, {user.name}! 
-                <span className="text-xs text-blue-500 ml-1">
-                  (ID: {user.neon_auth_user_id.slice(-8)})
-                </span>
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={toggleDarkMode}
-              >
-                {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-              </Button>
-              <Button variant="outline" size="sm" onClick={handleLogout}>
-                Logout
-              </Button>
-            </div>
+            <Button 
+              variant="outline" 
+              onClick={handleSignOut}
+              disabled={authLoading}
+            >
+              {authLoading ? 'Signing out...' : 'Sign Out'}
+            </Button>
           </div>
+
+          {/* Stats Dashboard */}
+          {userStats && (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-gray-600">
+                    Total Tasks
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-blue-600">
+                    {userStats.total_tasks}
+                  </div>
+                </CardContent>
+              </Card>
+              
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-gray-600">
+                    Completed
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-green-600">
+                    {userStats.completed_tasks}
+                  </div>
+                </CardContent>
+              </Card>
+              
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-gray-600">
+                    Focus Time
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-purple-600">
+                    {Math.round(userStats.total_focus_time / 60)}h
+                  </div>
+                </CardContent>
+              </Card>
+              
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-gray-600">
+                    Streak
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-orange-600 flex items-center gap-1">
+                    {userStats.current_streak}
+                    <span className="text-sm">🔥</span>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          <Separator className="mb-8" />
+
+          {/* Task Manager */}
+          <TaskManager 
+            tasks={tasks}
+            onTaskCreate={handleTaskCreate}
+            onTaskUpdate={handleTaskUpdate}
+            onTaskDelete={handleTaskDelete}
+            onFocusSessionStart={handleFocusSessionStart}
+          />
         </div>
-      </header>
+      </div>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <Dashboard
-          user={user}
-          tasks={tasks}
-          userStats={userStats}
-          onTaskCreate={handleTaskCreate}
-          onTaskUpdate={handleTaskUpdate}
-          onTaskDelete={handleTaskDelete}
-          onFocusSessionStart={handleFocusSessionStart}
-        />
-      </main>
-
-      {/* Focus Session Modal */}
-      {activeFocusSession && (
+      {/* Focus Session Overlay */}
+      {currentSession && (
         <FocusSession
-          session={activeFocusSession}
-          task={tasks.find((t: Task) => t.id === activeFocusSession.task_id)}
-          user={user}
-          onSessionEnd={handleFocusSessionEnd}
+          session={currentSession}
+          task={tasks.find((t: Task) => t.id === currentSession.task_id) || undefined}
+          onSessionEnd={handleSessionEnd}
         />
       )}
-    </div>
-  );
-}
-
-function App() {
-  return (
-    <StackAuthProvider>
-      <AppContent />
-    </StackAuthProvider>
+    </>
   );
 }
 

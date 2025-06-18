@@ -1,3 +1,4 @@
+
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { resetDB, createDB } from '../helpers';
 import { db } from '../db';
@@ -6,190 +7,134 @@ import { type StartFocusSessionInput } from '../schema';
 import { startFocusSession } from '../handlers/start_focus_session';
 import { eq } from 'drizzle-orm';
 
-// Helper function to create a test user with Neon Auth ID
-async function createTestUser(email: string = 'test@example.com', name: string = 'Test User') {
-  const result = await db.insert(usersTable)
-    .values({
-      neon_auth_user_id: `neon_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      email,
-      name
-    })
-    .returning()
-    .execute();
-  return result[0];
-}
+// Test user data
+const testUser = {
+  neon_auth_user_id: 'test_auth_123',
+  email: 'test@example.com',
+  name: 'Test User'
+};
+
+// Test task data
+const testTask = {
+  title: 'Test Task',
+  description: 'A task for testing',
+  priority: 'medium' as const
+};
 
 describe('startFocusSession', () => {
-  beforeEach(createDB);
-  afterEach(resetDB);
+  let userId: number;
+  let taskId: number;
 
-  it('should start a focus session successfully', async () => {
-    // Create a test user first
-    const user = await createTestUser();
+  beforeEach(async () => {
+    await createDB();
+    
+    // Create test user
+    const userResult = await db.insert(usersTable)
+      .values(testUser)
+      .returning()
+      .execute();
+    userId = userResult[0].id;
 
-    // Create a task
+    // Create test task
     const taskResult = await db.insert(tasksTable)
       .values({
-        user_id: user.id,
-        title: 'Focus Task',
-        scheduled_date: '2024-01-15'
+        ...testTask,
+        user_id: userId
       })
       .returning()
       .execute();
+    taskId = taskResult[0].id;
+  });
 
-    const task = taskResult[0];
+  afterEach(resetDB);
 
+  it('should start a focus session without a task', async () => {
+    const input: StartFocusSessionInput = {};
+
+    const result = await startFocusSession(input, userId);
+
+    // Verify session properties
+    expect(result.id).toBeDefined();
+    expect(result.user_id).toEqual(userId);
+    expect(result.task_id).toBeNull();
+    expect(result.duration_minutes).toEqual(0);
+    expect(result.started_at).toBeInstanceOf(Date);
+    expect(result.ended_at).toBeNull();
+    expect(result.created_at).toBeInstanceOf(Date);
+  });
+
+  it('should start a focus session with a task', async () => {
     const input: StartFocusSessionInput = {
-      user_id: user.id,
-      task_id: task.id,
-      duration_minutes: 30
+      task_id: taskId
     };
 
-    const result = await startFocusSession(input);
+    const result = await startFocusSession(input, userId);
 
-    expect(result.user_id).toEqual(user.id);
-    expect(result.task_id).toEqual(task.id);
-    expect(result.duration_minutes).toEqual(30);
-    expect(result.completed).toBe(false);
-    expect(result.ended_at).toBeNull();
-    expect(result.started_at).toBeInstanceOf(Date);
+    // Verify session properties
     expect(result.id).toBeDefined();
+    expect(result.user_id).toEqual(userId);
+    expect(result.task_id).toEqual(taskId);
+    expect(result.duration_minutes).toEqual(0);
+    expect(result.started_at).toBeInstanceOf(Date);
+    expect(result.ended_at).toBeNull();
+    expect(result.created_at).toBeInstanceOf(Date);
   });
 
   it('should save focus session to database', async () => {
-    // Create a test user first
-    const user = await createTestUser();
-
-    // Create a task
-    const taskResult = await db.insert(tasksTable)
-      .values({
-        user_id: user.id,
-        title: 'Database Task',
-        scheduled_date: '2024-01-15'
-      })
-      .returning()
-      .execute();
-
-    const task = taskResult[0];
-
     const input: StartFocusSessionInput = {
-      user_id: user.id,
-      task_id: task.id,
-      duration_minutes: 45
+      task_id: taskId
     };
 
-    const result = await startFocusSession(input);
+    const result = await startFocusSession(input, userId);
 
-    // Verify it was saved to database
+    // Query database to verify session was saved
     const sessions = await db.select()
       .from(focusSessionsTable)
       .where(eq(focusSessionsTable.id, result.id))
       .execute();
 
     expect(sessions).toHaveLength(1);
-    expect(sessions[0].user_id).toEqual(user.id);
-    expect(sessions[0].task_id).toEqual(task.id);
-    expect(sessions[0].duration_minutes).toEqual(45);
-    expect(sessions[0].completed).toBe(false);
+    expect(sessions[0].user_id).toEqual(userId);
+    expect(sessions[0].task_id).toEqual(taskId);
+    expect(sessions[0].duration_minutes).toEqual(0);
     expect(sessions[0].ended_at).toBeNull();
   });
 
-  it('should prevent starting multiple active sessions', async () => {
-    // Create a test user first
-    const user = await createTestUser();
-
-    // Create tasks
-    const task1Result = await db.insert(tasksTable)
-      .values({
-        user_id: user.id,
-        title: 'Task 1',
-        scheduled_date: '2024-01-15'
-      })
-      .returning()
-      .execute();
-
-    const task2Result = await db.insert(tasksTable)
-      .values({
-        user_id: user.id,
-        title: 'Task 2',
-        scheduled_date: '2024-01-15'
-      })
-      .returning()
-      .execute();
-
-    const task1 = task1Result[0];
-    const task2 = task2Result[0];
-
-    // Start first session
-    const input1: StartFocusSessionInput = {
-      user_id: user.id,
-      task_id: task1.id,
-      duration_minutes: 30
+  it('should throw error for non-existent task', async () => {
+    const input: StartFocusSessionInput = {
+      task_id: 99999
     };
 
-    await startFocusSession(input1);
-
-    // Try to start second session (should fail)
-    const input2: StartFocusSessionInput = {
-      user_id: user.id,
-      task_id: task2.id,
-      duration_minutes: 30
-    };
-
-    await expect(startFocusSession(input2)).rejects.toThrow(/already has an active/i);
+    await expect(startFocusSession(input, userId)).rejects.toThrow(/task not found/i);
   });
 
-  it('should handle different duration values', async () => {
-    // Create a test user first
-    const user = await createTestUser();
-
-    // Create a task
-    const taskResult = await db.insert(tasksTable)
+  it('should throw error for task belonging to different user', async () => {
+    // Create another user
+    const otherUserResult = await db.insert(usersTable)
       .values({
-        user_id: user.id,
-        title: 'Duration Test Task',
-        scheduled_date: '2024-01-15'
+        neon_auth_user_id: 'other_auth_456',
+        email: 'other@example.com',
+        name: 'Other User'
       })
       .returning()
       .execute();
+    const otherUserId = otherUserResult[0].id;
 
-    const task = taskResult[0];
-
-    const input: StartFocusSessionInput = {
-      user_id: user.id,
-      task_id: task.id,
-      duration_minutes: 90
-    };
-
-    const result = await startFocusSession(input);
-
-    expect(result.duration_minutes).toEqual(90);
-  });
-
-  it('should handle task ownership validation', async () => {
-    // Create two test users
-    const user1 = await createTestUser('user1@example.com', 'User One');
-    const user2 = await createTestUser('user2@example.com', 'User Two');
-
-    // Create a task owned by user1
-    const taskResult = await db.insert(tasksTable)
+    // Create task for other user
+    const otherTaskResult = await db.insert(tasksTable)
       .values({
-        user_id: user1.id,
-        title: 'User1 Task',
-        scheduled_date: '2024-01-15'
+        ...testTask,
+        user_id: otherUserId,
+        title: 'Other User Task'
       })
       .returning()
       .execute();
+    const otherTaskId = otherTaskResult[0].id;
 
-    const task = taskResult[0];
-
-    // Try to start focus session with user2 (should fail)
     const input: StartFocusSessionInput = {
-      user_id: user2.id,
-      task_id: task.id,
-      duration_minutes: 30
+      task_id: otherTaskId
     };
 
-    await expect(startFocusSession(input)).rejects.toThrow(/not found/i);
+    await expect(startFocusSession(input, userId)).rejects.toThrow(/task does not belong to user/i);
   });
 });

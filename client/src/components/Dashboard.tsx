@@ -3,8 +3,8 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { TaskForm } from '@/components/TaskForm';
-import { TaskList } from '@/components/TaskList';
+import { TaskForm } from './TaskForm';
+import { TaskList } from './TaskList';
 import { Plus, Clock, CheckCircle, Target, Zap } from 'lucide-react';
 import type { User, Task, UserStats, FocusSession } from '../../../server/src/schema';
 
@@ -31,9 +31,6 @@ export function Dashboard({
 
   const pendingTasks = tasks.filter((task: Task) => !task.completed);
   const completedTasks = tasks.filter((task: Task) => task.completed);
-  const totalEstimatedMinutes = pendingTasks.reduce((sum: number, task: Task) => 
-    sum + (task.estimated_minutes || 0), 0
-  );
 
   const completionRate = tasks.length > 0 
     ? Math.round((completedTasks.length / tasks.length) * 100) 
@@ -67,7 +64,7 @@ export function Dashboard({
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-blue-900 dark:text-blue-100">
-              {userStats?.total_focus_minutes || 0}m
+              {Math.round((userStats?.total_focus_time || 0) / 60)}m
             </div>
             <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
               Time spent focused today
@@ -137,7 +134,7 @@ export function Dashboard({
                   Today's Tasks
                 </CardTitle>
                 <CardDescription>
-                  {pendingTasks.length} tasks • ~{totalEstimatedMinutes}min estimated
+                  {pendingTasks.length} tasks remaining
                 </CardDescription>
               </div>
               <Button
@@ -153,7 +150,6 @@ export function Dashboard({
           <CardContent>
             <TaskList
               tasks={pendingTasks}
-              user={user}
               onTaskUpdate={onTaskUpdate}
               onTaskDelete={onTaskDelete}
               onFocusSessionStart={onFocusSessionStart}
@@ -182,7 +178,6 @@ export function Dashboard({
           <CardContent>
             <TaskList
               tasks={completedTasks}
-              user={user}
               onTaskUpdate={onTaskUpdate}
               onTaskDelete={onTaskDelete}
               onFocusSessionStart={onFocusSessionStart}
@@ -201,7 +196,6 @@ export function Dashboard({
       {/* Task Form Modal */}
       {showTaskForm && (
         <TaskForm
-          user={user}
           onTaskCreate={onTaskCreate}
           onClose={() => setShowTaskForm(false)}
         />

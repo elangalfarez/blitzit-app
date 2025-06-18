@@ -5,24 +5,22 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { trpc } from '@/utils/trpc';
-import type { User, Task, CreateTaskInput } from '../../../server/src/schema';
+import type { Task, CreateTaskInput } from '../../../server/src/schema';
 
 interface TaskFormProps {
-  user: User;
   onTaskCreate: (task: Task) => void;
   onClose: () => void;
 }
 
-export function TaskForm({ user, onTaskCreate, onClose }: TaskFormProps) {
+export function TaskForm({ onTaskCreate, onClose }: TaskFormProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState<CreateTaskInput>({
-    user_id: user.id,
     title: '',
     description: null,
-    estimated_minutes: null,
-    scheduled_date: new Date()
+    priority: 'medium'
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -80,19 +78,21 @@ export function TaskForm({ user, onTaskCreate, onClose }: TaskFormProps) {
           </div>
 
           <div>
-            <Input
-              type="number"
-              placeholder="Estimated time (minutes)"
-              value={formData.estimated_minutes || ''}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                setFormData((prev: CreateTaskInput) => ({
-                  ...prev,
-                  estimated_minutes: e.target.value ? parseInt(e.target.value) : null
-                }))
+            <Select
+              value={formData.priority || 'medium'}
+              onValueChange={(value: 'low' | 'medium' | 'high') =>
+                setFormData((prev: CreateTaskInput) => ({ ...prev, priority: value }))
               }
-              min="1"
-              className="w-full"
-            />
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select priority" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="low">Low Priority</SelectItem>
+                <SelectItem value="medium">Medium Priority</SelectItem>
+                <SelectItem value="high">High Priority</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {error && (

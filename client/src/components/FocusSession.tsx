@@ -5,18 +5,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { Zap, Clock, Target, CheckCircle, X, Play, Pause } from 'lucide-react';
+import { Zap, Target, CheckCircle, X, Play, Pause } from 'lucide-react';
 import { trpc } from '@/utils/trpc';
-import type { User, Task, FocusSession as FocusSessionType } from '../../../server/src/schema';
+import type { Task, FocusSession as FocusSessionType } from '../../../server/src/schema';
 
 interface FocusSessionProps {
   session: FocusSessionType;
   task?: Task;
-  user: User;
   onSessionEnd: () => void;
 }
 
-export function FocusSession({ session, task, user, onSessionEnd }: FocusSessionProps) {
+export function FocusSession({ session, task, onSessionEnd }: FocusSessionProps) {
   const [timeRemaining, setTimeRemaining] = useState(session.duration_minutes * 60);
   const [isActive, setIsActive] = useState(true);
   const [showEndDialog, setShowEndDialog] = useState(false);
@@ -31,13 +30,13 @@ export function FocusSession({ session, task, user, onSessionEnd }: FocusSession
     return "🎉 Final stretch! You're about to Blitz this task!";
   }, []);
 
-  const handleSessionComplete = useCallback(async (completed: boolean) => {
+  const handleSessionComplete = useCallback(async () => {
     setIsEnding(true);
     try {
+      const actualDuration = Math.ceil((session.duration_minutes * 60 - timeRemaining) / 60);
       await trpc.endFocusSession.mutate({
-        session_id: session.id,
-        user_id: user.id,
-        completed
+        id: session.id,
+        duration_minutes: Math.max(actualDuration, 1) // At least 1 minute
       });
       onSessionEnd();
     } catch (error) {
@@ -45,18 +44,18 @@ export function FocusSession({ session, task, user, onSessionEnd }: FocusSession
     } finally {
       setIsEnding(false);
     }
-  }, [session.id, user.id, onSessionEnd]);
+  }, [session.id, session.duration_minutes, timeRemaining, onSessionEnd]);
 
   // Timer effect
   useEffect(() => {
-    let interval: ReturnType<typeof setInterval> | null = null;
+    let interval: number | null = null;
 
     if (isActive && timeRemaining > 0) {
-      interval = setInterval(() => {
+      interval = window.setInterval(() => {
         setTimeRemaining((prev: number) => {
           if (prev <= 1) {
             // Session completed naturally
-            handleSessionComplete(true);
+            handleSessionComplete();
             return 0;
           }
           return prev - 1;
@@ -65,7 +64,7 @@ export function FocusSession({ session, task, user, onSessionEnd }: FocusSession
     }
 
     return () => {
-      if (interval) clearInterval(interval);
+      if (interval) window.clearInterval(interval);
     };
   }, [isActive, timeRemaining, handleSessionComplete]);
 
@@ -130,12 +129,9 @@ export function FocusSession({ session, task, user, onSessionEnd }: FocusSession
               <div className="flex items-center gap-2 justify-center text-blue-200">
                 <Target className="h-4 w-4" />
                 <span className="text-sm">{task.title}</span>
-                {task.estimated_minutes && (
-                  <Badge variant="secondary" className="bg-blue-800 text-blue-100">
-                    <Clock className="h-3 w-3 mr-1" />
-                    {task.estimated_minutes}m goal
-                  </Badge>
-                )}
+                <Badge variant="secondary" className="bg-blue-800 text-blue-100">
+                  {task.priority}
+                </Badge>
               </div>
             )}
 
@@ -194,7 +190,7 @@ export function FocusSession({ session, task, user, onSessionEnd }: FocusSession
               Continue Session
             </AlertDialogCancel>
             <Button
-              onClick={() => handleSessionComplete(false)}
+              onClick={() => handleSessionComplete()}
               variant="outline"
               disabled={isEnding}
             >
@@ -202,7 +198,7 @@ export function FocusSession({ session, task, user, onSessionEnd }: FocusSession
               {isEnding ? 'Ending...' : 'End Early'}
             </Button>
             <AlertDialogAction
-              onClick={() => handleSessionComplete(true)}
+              onClick={() => handleSessionComplete()}
               className="bg-green-600 hover:bg-green-700"
               disabled={isEnding}
             >

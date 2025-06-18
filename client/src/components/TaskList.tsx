@@ -4,13 +4,12 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { Clock, Zap, Trash2, CheckCircle } from 'lucide-react';
+import { Zap, Trash2, CheckCircle } from 'lucide-react';
 import { trpc } from '@/utils/trpc';
-import type { User, Task, FocusSession } from '../../../server/src/schema';
+import type { Task, FocusSession } from '../../../server/src/schema';
 
 interface TaskListProps {
   tasks: Task[];
-  user: User;
   onTaskUpdate: (task: Task) => void;
   onTaskDelete: (taskId: number) => void;
   onFocusSessionStart: (session: FocusSession) => void;
@@ -19,7 +18,6 @@ interface TaskListProps {
 
 export function TaskList({ 
   tasks, 
-  user, 
   onTaskUpdate, 
   onTaskDelete, 
   onFocusSessionStart, 
@@ -34,7 +32,6 @@ export function TaskList({
     try {
       const updatedTask = await trpc.updateTask.mutate({
         id: task.id,
-        user_id: user.id,
         completed: !task.completed
       });
       onTaskUpdate(updatedTask);
@@ -55,9 +52,7 @@ export function TaskList({
 
     try {
       const session = await trpc.startFocusSession.mutate({
-        user_id: user.id,
-        task_id: task.id,
-        duration_minutes: task.estimated_minutes || 25 // Default to 25 minutes if no estimate
+        task_id: task.id
       });
       onFocusSessionStart(session);
     } catch (error) {
@@ -73,10 +68,23 @@ export function TaskList({
 
   const handleDeleteTask = async (taskId: number) => {
     try {
-      await trpc.deleteTask.mutate({ taskId, userId: user.id });
+      await trpc.deleteTask.mutate({ id: taskId });
       onTaskDelete(taskId);
     } catch (error) {
       console.error('Failed to delete task:', error);
+    }
+  };
+
+  const getPriorityColor = (priority: string) => {
+    switch (priority) {
+      case 'high':
+        return 'bg-red-100 text-red-800 border-red-200';
+      case 'medium':
+        return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+      case 'low':
+        return 'bg-green-100 text-green-800 border-green-200';
+      default:
+        return 'bg-gray-100 text-gray-800 border-gray-200';
     }
   };
 
@@ -114,12 +122,9 @@ export function TaskList({
                 >
                   {task.title}
                 </h3>
-                {task.estimated_minutes && (
-                  <Badge variant="secondary" className="flex items-center gap-1 text-xs">
-                    <Clock className="h-3 w-3" />
-                    {task.estimated_minutes}m
-                  </Badge>
-                )}
+                <Badge className={getPriorityColor(task.priority)}>
+                  {task.priority}
+                </Badge>
               </div>
               {task.description && (
                 <p

@@ -4,38 +4,15 @@ import { createHTTPServer } from '@trpc/server/adapters/standalone';
 import 'dotenv/config';
 import cors from 'cors';
 import superjson from 'superjson';
-import { z } from 'zod';
-
-// Verify Stack Auth environment variables
-const STACK_SECRET_SERVER_KEY = process.env['STACK_SECRET_SERVER_KEY'];
-const DATABASE_URL = process.env['DATABASE_URL'];
-
-if (!STACK_SECRET_SERVER_KEY) {
-  console.warn('STACK_SECRET_SERVER_KEY not found in environment variables');
-}
-
-if (!DATABASE_URL) {
-  console.warn('DATABASE_URL not found in environment variables');
-}
-
-console.log('Stack Auth configuration:', {
-  hasServerKey: !!STACK_SECRET_SERVER_KEY,
-  hasDbUrl: !!DATABASE_URL
-});
-
-// Import schemas
 import {
   signUpInputSchema,
   signInInputSchema,
   createTaskInputSchema,
   updateTaskInputSchema,
-  getTasksInputSchema,
+  deleteTaskInputSchema,
   startFocusSessionInputSchema,
-  endFocusSessionInputSchema,
-  getUserStatsInputSchema
+  endFocusSessionInputSchema
 } from './schema';
-
-// Import handlers
 import { signUp } from './handlers/sign_up';
 import { signIn } from './handlers/sign_in';
 import { createTask } from './handlers/create_task';
@@ -45,13 +22,49 @@ import { deleteTask } from './handlers/delete_task';
 import { startFocusSession } from './handlers/start_focus_session';
 import { endFocusSession } from './handlers/end_focus_session';
 import { getUserStats } from './handlers/get_user_stats';
+import { getCurrentUser } from './handlers/get_current_user';
+import type { User } from './schema';
 
-const t = initTRPC.create({
+// Define context type
+type Context = {
+  neonAuthUserId?: string;
+};
+
+type AuthenticatedContext = Context & {
+  user: User;
+  userId: number;
+};
+
+const t = initTRPC.context<Context>().create({
   transformer: superjson,
 });
 
 const publicProcedure = t.procedure;
 const router = t.router;
+
+// Helper to extract user ID from Neon Auth context
+// This would typically be implemented using Stack Auth middleware
+const authenticatedProcedure = publicProcedure.use(async ({ ctx, next }) => {
+  // TODO: Implement Stack Auth middleware to extract user from token/session
+  // For now, this is a placeholder that should be replaced with actual Stack Auth integration
+  const neonAuthUserId = ctx.neonAuthUserId;
+  if (!neonAuthUserId) {
+    throw new Error('Unauthorized');
+  }
+  
+  const user = await getCurrentUser(neonAuthUserId);
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  return next({
+    ctx: {
+      ...ctx,
+      user,
+      userId: user.id
+    } as AuthenticatedContext
+  });
+});
 
 const appRouter = router({
   healthcheck: publicProcedure.query(() => {
@@ -67,36 +80,38 @@ const appRouter = router({
     .input(signInInputSchema)
     .mutation(({ input }) => signIn(input)),
 
-  // Task routes
-  createTask: publicProcedure
+  // Task routes (authenticated)
+  createTask: authenticatedProcedure
     .input(createTaskInputSchema)
-    .mutation(({ input }) => createTask(input)),
+    .mutation(({ input, ctx }) => createTask(input, ctx.userId)),
 
-  getTasks: publicProcedure
-    .input(getTasksInputSchema)
-    .query(({ input }) => getTasks(input)),
+  getTasks: authenticatedProcedure
+    .query(({ ctx }) => getTasks(ctx.userId)),
 
-  updateTask: publicProcedure
+  updateTask: authenticatedProcedure
     .input(updateTaskInputSchema)
-    .mutation(({ input }) => updateTask(input)),
+    .mutation(({ input, ctx }) => updateTask(input, ctx.userId)),
 
-  deleteTask: publicProcedure
-    .input(z.object({ taskId: z.number(), userId: z.number() }))
-    .mutation(({ input }) => deleteTask(input.taskId, input.userId)),
+  deleteTask: authenticatedProcedure
+    .input(deleteTaskInputSchema)
+    .mutation(({ input, ctx }) => deleteTask(input, ctx.userId)),
 
-  // Focus session routes
-  startFocusSession: publicProcedure
+  // Focus session routes (authenticated)
+  startFocusSession: authenticatedProcedure
     .input(startFocusSessionInputSchema)
-    .mutation(({ input }) => startFocusSession(input)),
+    .mutation(({ input, ctx }) => startFocusSession(input, ctx.userId)),
 
-  endFocusSession: publicProcedure
+  endFocusSession: authenticatedProcedure
     .input(endFocusSessionInputSchema)
-    .mutation(({ input }) => endFocusSession(input)),
+    .mutation(({ input, ctx }) => endFocusSession(input, ctx.userId)),
 
-  // Dashboard routes
-  getUserStats: publicProcedure
-    .input(getUserStatsInputSchema)
-    .query(({ input }) => getUserStats(input)),
+  // User stats route (authenticated)
+  getUserStats: authenticatedProcedure
+    .query(({ ctx }) => getUserStats(ctx.userId)),
+
+  // Get current user (authenticated)
+  getCurrentUser: authenticatedProcedure
+    .query(({ ctx }) => ctx.user)
 });
 
 export type AppRouter = typeof appRouter;
@@ -108,8 +123,12 @@ async function start() {
       cors()(req, res, next);
     },
     router: appRouter,
-    createContext() {
-      return {};
+    createContext(): Context {
+      // TODO: Extract Neon Auth user ID from request headers/cookies
+      // This should be implemented using Stack Auth middleware
+      return {
+        neonAuthUserId: undefined // Placeholder - should be extracted from Stack Auth session
+      };
     },
   });
   server.listen(port);

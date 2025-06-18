@@ -1,69 +1,34 @@
+
 import { db } from '../db';
-import { focusSessionsTable, tasksTable } from '../db/schema';
+import { focusSessionsTable } from '../db/schema';
 import { type EndFocusSessionInput, type FocusSession } from '../schema';
 import { eq, and, isNull } from 'drizzle-orm';
 
-export const endFocusSession = async (input: EndFocusSessionInput): Promise<FocusSession> => {
+export const endFocusSession = async (input: EndFocusSessionInput, userId: number): Promise<FocusSession> => {
   try {
-    // First check if session exists, belongs to user, and is not already ended
-    const existingSessions = await db.select()
-      .from(focusSessionsTable)
-      .where(and(
-        eq(focusSessionsTable.id, input.session_id),
-        eq(focusSessionsTable.user_id, input.user_id),
-        isNull(focusSessionsTable.ended_at)
-      ))
-      .execute();
-
-    if (existingSessions.length === 0) {
-      // Check if it exists but is already ended
-      const alreadyEndedSessions = await db.select()
-        .from(focusSessionsTable)
-        .where(and(
-          eq(focusSessionsTable.id, input.session_id),
-          eq(focusSessionsTable.user_id, input.user_id)
-        ))
-        .execute();
-
-      if (alreadyEndedSessions.length > 0) {
-        throw new Error('Focus session already ended');
-      } else {
-        throw new Error('Focus session not found or not owned by user');
-      }
-    }
-
-    // Update the focus session with end time and completion status
+    // Update the focus session with duration and end time
     const result = await db.update(focusSessionsTable)
       .set({
-        ended_at: new Date(),
-        completed: input.completed
+        duration_minutes: input.duration_minutes,
+        ended_at: new Date()
       })
       .where(
         and(
-          eq(focusSessionsTable.id, input.session_id),
-          eq(focusSessionsTable.user_id, input.user_id)
+          eq(focusSessionsTable.id, input.id),
+          eq(focusSessionsTable.user_id, userId),
+          isNull(focusSessionsTable.ended_at) // Only update sessions that haven't ended yet
         )
       )
       .returning()
       .execute();
 
-    const focusSession = result[0];
-
-    // If the session was completed, mark the associated task as completed
-    if (input.completed) {
-      await db.update(tasksTable)
-        .set({
-          completed: true,
-          completed_at: new Date(),
-          updated_at: new Date()
-        })
-        .where(eq(tasksTable.id, focusSession.task_id))
-        .execute();
+    if (result.length === 0) {
+      throw new Error('Focus session not found or already ended');
     }
 
-    return focusSession;
+    return result[0];
   } catch (error) {
-    console.error('End focus session failed:', error);
+    console.error('Focus session ending failed:', error);
     throw error;
   }
 };

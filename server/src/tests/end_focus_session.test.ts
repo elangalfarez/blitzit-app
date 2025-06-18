@@ -1,252 +1,255 @@
+
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { resetDB, createDB } from '../helpers';
 import { db } from '../db';
 import { usersTable, tasksTable, focusSessionsTable } from '../db/schema';
 import { type EndFocusSessionInput } from '../schema';
 import { endFocusSession } from '../handlers/end_focus_session';
-import { eq } from 'drizzle-orm';
-
-// Helper function to create a test user with Neon Auth ID
-async function createTestUser(email: string = 'test@example.com', name: string = 'Test User') {
-  const result = await db.insert(usersTable)
-    .values({
-      neon_auth_user_id: `neon_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      email,
-      name
-    })
-    .returning()
-    .execute();
-  return result[0];
-}
+import { eq, and, isNull } from 'drizzle-orm';
 
 describe('endFocusSession', () => {
   beforeEach(createDB);
   afterEach(resetDB);
 
-  it('should end focus session successfully', async () => {
-    // Create a test user first
-    const user = await createTestUser();
+  it('should end an ongoing focus session', async () => {
+    // Create test user
+    const userResult = await db.insert(usersTable)
+      .values({
+        neon_auth_user_id: 'test-neon-id',
+        email: 'test@example.com',
+        name: 'Test User'
+      })
+      .returning()
+      .execute();
+    const userId = userResult[0].id;
 
-    // Create a task
+    // Create test task
     const taskResult = await db.insert(tasksTable)
       .values({
-        user_id: user.id,
-        title: 'Focus Task',
-        scheduled_date: '2024-01-15'
+        user_id: userId,
+        title: 'Test Task',
+        description: 'A task for testing',
+        priority: 'medium'
       })
       .returning()
       .execute();
+    const taskId = taskResult[0].id;
 
-    const task = taskResult[0];
-
-    // Create a focus session
+    // Create ongoing focus session
     const sessionResult = await db.insert(focusSessionsTable)
       .values({
-        user_id: user.id,
-        task_id: task.id,
-        duration_minutes: 30,
-        started_at: new Date()
+        user_id: userId,
+        task_id: taskId,
+        duration_minutes: 0, // Initial duration
+        started_at: new Date(),
+        ended_at: null // Ongoing session
       })
       .returning()
       .execute();
-
-    const session = sessionResult[0];
+    const sessionId = sessionResult[0].id;
 
     const input: EndFocusSessionInput = {
-      session_id: session.id,
-      user_id: user.id,
-      completed: true
+      id: sessionId,
+      duration_minutes: 25
     };
 
-    const result = await endFocusSession(input);
+    const result = await endFocusSession(input, userId);
 
-    expect(result.id).toEqual(session.id);
-    expect(result.completed).toBe(true);
+    // Verify the result
+    expect(result.id).toEqual(sessionId);
+    expect(result.user_id).toEqual(userId);
+    expect(result.task_id).toEqual(taskId);
+    expect(result.duration_minutes).toEqual(25);
     expect(result.ended_at).toBeInstanceOf(Date);
-    expect(result.user_id).toEqual(user.id);
-    expect(result.task_id).toEqual(task.id);
-  });
-
-  it('should end focus session as incomplete', async () => {
-    // Create a test user first
-    const user = await createTestUser();
-
-    // Create a task
-    const taskResult = await db.insert(tasksTable)
-      .values({
-        user_id: user.id,
-        title: 'Focus Task',
-        scheduled_date: '2024-01-15'
-      })
-      .returning()
-      .execute();
-
-    const task = taskResult[0];
-
-    // Create a focus session
-    const sessionResult = await db.insert(focusSessionsTable)
-      .values({
-        user_id: user.id,
-        task_id: task.id,
-        duration_minutes: 30,
-        started_at: new Date()
-      })
-      .returning()
-      .execute();
-
-    const session = sessionResult[0];
-
-    const input: EndFocusSessionInput = {
-      session_id: session.id,
-      user_id: user.id,
-      completed: false
-    };
-
-    const result = await endFocusSession(input);
-
-    expect(result.id).toEqual(session.id);
-    expect(result.completed).toBe(false);
-    expect(result.ended_at).toBeInstanceOf(Date);
-  });
-
-  it('should throw error when session not found', async () => {
-    // Create a test user first
-    const user = await createTestUser();
-
-    const input: EndFocusSessionInput = {
-      session_id: 999,
-      user_id: user.id,
-      completed: true
-    };
-
-    await expect(endFocusSession(input)).rejects.toThrow(/not found/i);
-  });
-
-  it('should throw error when user does not own the session', async () => {
-    // Create two test users
-    const user1 = await createTestUser('user1@example.com', 'User One');
-    const user2 = await createTestUser('user2@example.com', 'User Two');
-
-    // Create a task for user1
-    const taskResult = await db.insert(tasksTable)
-      .values({
-        user_id: user1.id,
-        title: 'User1 Task',
-        scheduled_date: '2024-01-15'
-      })
-      .returning()
-      .execute();
-
-    const task = taskResult[0];
-
-    // Create a focus session for user1
-    const sessionResult = await db.insert(focusSessionsTable)
-      .values({
-        user_id: user1.id,
-        task_id: task.id,
-        duration_minutes: 30,
-        started_at: new Date()
-      })
-      .returning()
-      .execute();
-
-    const session = sessionResult[0];
-
-    const input: EndFocusSessionInput = {
-      session_id: session.id,
-      user_id: user2.id, // Different user trying to end session
-      completed: true
-    };
-
-    await expect(endFocusSession(input)).rejects.toThrow(/not found/i);
+    expect(result.ended_at).not.toBeNull();
+    expect(result.started_at).toBeInstanceOf(Date);
+    expect(result.created_at).toBeInstanceOf(Date);
   });
 
   it('should save ended session to database', async () => {
-    // Create a test user first
-    const user = await createTestUser();
-
-    // Create a task
-    const taskResult = await db.insert(tasksTable)
+    // Create test user
+    const userResult = await db.insert(usersTable)
       .values({
-        user_id: user.id,
-        title: 'Database Task',
-        scheduled_date: '2024-01-15'
+        neon_auth_user_id: 'test-neon-id',
+        email: 'test@example.com',
+        name: 'Test User'
       })
       .returning()
       .execute();
+    const userId = userResult[0].id;
 
-    const task = taskResult[0];
-
-    // Create a focus session
+    // Create ongoing focus session without task
     const sessionResult = await db.insert(focusSessionsTable)
       .values({
-        user_id: user.id,
-        task_id: task.id,
-        duration_minutes: 45,
-        started_at: new Date()
+        user_id: userId,
+        task_id: null, // Session without specific task
+        duration_minutes: 0,
+        started_at: new Date(),
+        ended_at: null
       })
       .returning()
       .execute();
-
-    const session = sessionResult[0];
+    const sessionId = sessionResult[0].id;
 
     const input: EndFocusSessionInput = {
-      session_id: session.id,
-      user_id: user.id,
-      completed: true
+      id: sessionId,
+      duration_minutes: 30
     };
 
-    await endFocusSession(input);
+    await endFocusSession(input, userId);
 
-    // Verify it was saved to database
+    // Verify the session was updated in database
     const sessions = await db.select()
       .from(focusSessionsTable)
-      .where(eq(focusSessionsTable.id, session.id))
+      .where(eq(focusSessionsTable.id, sessionId))
       .execute();
 
     expect(sessions).toHaveLength(1);
-    expect(sessions[0].completed).toBe(true);
+    expect(sessions[0].duration_minutes).toEqual(30);
     expect(sessions[0].ended_at).toBeInstanceOf(Date);
     expect(sessions[0].ended_at).not.toBeNull();
   });
 
-  it('should not end already ended session', async () => {
-    // Create a test user first
-    const user = await createTestUser();
-
-    // Create a task
-    const taskResult = await db.insert(tasksTable)
-      .values({
-        user_id: user.id,
-        title: 'Already Ended Task',
-        scheduled_date: '2024-01-15'
-      })
-      .returning()
-      .execute();
-
-    const task = taskResult[0];
-
-    // Create an already ended focus session
-    const sessionResult = await db.insert(focusSessionsTable)
-      .values({
-        user_id: user.id,
-        task_id: task.id,
-        duration_minutes: 30,
-        started_at: new Date(),
-        ended_at: new Date(),
-        completed: true
-      })
-      .returning()
-      .execute();
-
-    const session = sessionResult[0];
-
+  it('should throw error for non-existent session', async () => {
     const input: EndFocusSessionInput = {
-      session_id: session.id,
-      user_id: user.id,
-      completed: false
+      id: 999,
+      duration_minutes: 25
     };
 
-    await expect(endFocusSession(input)).rejects.toThrow(/already ended/i);
+    await expect(endFocusSession(input, 1)).rejects.toThrow(/not found or already ended/i);
+  });
+
+  it('should throw error for session belonging to different user', async () => {
+    // Create test user
+    const userResult = await db.insert(usersTable)
+      .values({
+        neon_auth_user_id: 'test-neon-id',
+        email: 'test@example.com',
+        name: 'Test User'
+      })
+      .returning()
+      .execute();
+    const userId = userResult[0].id;
+
+    // Create ongoing focus session
+    const sessionResult = await db.insert(focusSessionsTable)
+      .values({
+        user_id: userId,
+        task_id: null,
+        duration_minutes: 0,
+        started_at: new Date(),
+        ended_at: null
+      })
+      .returning()
+      .execute();
+    const sessionId = sessionResult[0].id;
+
+    const input: EndFocusSessionInput = {
+      id: sessionId,
+      duration_minutes: 25
+    };
+
+    // Try to end session with different user ID
+    await expect(endFocusSession(input, userId + 1)).rejects.toThrow(/not found or already ended/i);
+  });
+
+  it('should throw error for already ended session', async () => {
+    // Create test user
+    const userResult = await db.insert(usersTable)
+      .values({
+        neon_auth_user_id: 'test-neon-id',
+        email: 'test@example.com',
+        name: 'Test User'
+      })
+      .returning()
+      .execute();
+    const userId = userResult[0].id;
+
+    // Create already ended focus session
+    const sessionResult = await db.insert(focusSessionsTable)
+      .values({
+        user_id: userId,
+        task_id: null,
+        duration_minutes: 20,
+        started_at: new Date(),
+        ended_at: new Date() // Already ended
+      })
+      .returning()
+      .execute();
+    const sessionId = sessionResult[0].id;
+
+    const input: EndFocusSessionInput = {
+      id: sessionId,
+      duration_minutes: 25
+    };
+
+    await expect(endFocusSession(input, userId)).rejects.toThrow(/not found or already ended/i);
+  });
+
+  it('should only update ongoing sessions', async () => {
+    // Create test user
+    const userResult = await db.insert(usersTable)
+      .values({
+        neon_auth_user_id: 'test-neon-id',
+        email: 'test@example.com',
+        name: 'Test User'
+      })
+      .returning()
+      .execute();
+    const userId = userResult[0].id;
+
+    // Create multiple sessions - one ongoing, one ended
+    const ongoingResult = await db.insert(focusSessionsTable)
+      .values({
+        user_id: userId,
+        task_id: null,
+        duration_minutes: 0,
+        started_at: new Date(),
+        ended_at: null // Ongoing
+      })
+      .returning()
+      .execute();
+
+    const endedResult = await db.insert(focusSessionsTable)
+      .values({
+        user_id: userId,
+        task_id: null,
+        duration_minutes: 15,
+        started_at: new Date(),
+        ended_at: new Date() // Already ended
+      })
+      .returning()
+      .execute();
+
+    // End the ongoing session
+    const input: EndFocusSessionInput = {
+      id: ongoingResult[0].id,
+      duration_minutes: 25
+    };
+
+    await endFocusSession(input, userId);
+
+    // Verify only the ongoing session was updated
+    const ongoingSessions = await db.select()
+      .from(focusSessionsTable)
+      .where(
+        and(
+          eq(focusSessionsTable.user_id, userId),
+          isNull(focusSessionsTable.ended_at)
+        )
+      )
+      .execute();
+
+    expect(ongoingSessions).toHaveLength(0); // No more ongoing sessions
+
+    const allSessions = await db.select()
+      .from(focusSessionsTable)
+      .where(eq(focusSessionsTable.user_id, userId))
+      .execute();
+
+    expect(allSessions).toHaveLength(2);
+    // The ended session should remain unchanged
+    const unchangedSession = allSessions.find(s => s.id === endedResult[0].id);
+    expect(unchangedSession?.duration_minutes).toEqual(15);
   });
 });

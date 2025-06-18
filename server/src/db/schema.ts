@@ -1,63 +1,66 @@
 
-import { serial, text, pgTable, timestamp, integer, boolean, varchar, date } from 'drizzle-orm/pg-core';
+import { serial, text, pgTable, timestamp, integer, boolean, pgEnum } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
+// Priority enum for tasks
+export const priorityEnum = pgEnum('priority', ['low', 'medium', 'high']);
+
+// Users table with Neon Auth integration
 export const usersTable = pgTable('users', {
   id: serial('id').primaryKey(),
-  neon_auth_user_id: varchar('neon_auth_user_id', { length: 255 }).notNull().unique(),
-  email: varchar('email', { length: 255 }).notNull().unique(),
-  name: varchar('name', { length: 255 }).notNull(),
+  neon_auth_user_id: text('neon_auth_user_id').notNull().unique(), // Links to Neon Auth's internal user ID
+  email: text('email').notNull().unique(),
+  name: text('name').notNull(),
   created_at: timestamp('created_at').defaultNow().notNull(),
-  updated_at: timestamp('updated_at').defaultNow().notNull(),
+  updated_at: timestamp('updated_at').defaultNow().notNull()
 });
 
+// Tasks table
 export const tasksTable = pgTable('tasks', {
   id: serial('id').primaryKey(),
-  user_id: integer('user_id').notNull().references(() => usersTable.id, { onDelete: 'cascade' }),
-  title: varchar('title', { length: 500 }).notNull(),
-  description: text('description'),
-  estimated_minutes: integer('estimated_minutes'),
-  completed: boolean('completed').default(false).notNull(),
-  completed_at: timestamp('completed_at'),
-  scheduled_date: date('scheduled_date').notNull(),
+  user_id: integer('user_id').notNull().references(() => usersTable.id),
+  title: text('title').notNull(),
+  description: text('description'), // Nullable by default
+  completed: boolean('completed').notNull().default(false),
+  priority: priorityEnum('priority').notNull().default('medium'),
   created_at: timestamp('created_at').defaultNow().notNull(),
-  updated_at: timestamp('updated_at').defaultNow().notNull(),
+  updated_at: timestamp('updated_at').defaultNow().notNull()
 });
 
+// Focus sessions table
 export const focusSessionsTable = pgTable('focus_sessions', {
   id: serial('id').primaryKey(),
-  user_id: integer('user_id').notNull().references(() => usersTable.id, { onDelete: 'cascade' }),
-  task_id: integer('task_id').notNull().references(() => tasksTable.id, { onDelete: 'cascade' }),
+  user_id: integer('user_id').notNull().references(() => usersTable.id),
+  task_id: integer('task_id').references(() => tasksTable.id), // Nullable - can focus without specific task
   duration_minutes: integer('duration_minutes').notNull(),
   started_at: timestamp('started_at').defaultNow().notNull(),
-  ended_at: timestamp('ended_at'),
-  completed: boolean('completed').default(false).notNull(),
-  created_at: timestamp('created_at').defaultNow().notNull(),
+  ended_at: timestamp('ended_at'), // Nullable - null means session is ongoing
+  created_at: timestamp('created_at').defaultNow().notNull()
 });
 
 // Relations
 export const usersRelations = relations(usersTable, ({ many }) => ({
   tasks: many(tasksTable),
-  focusSessions: many(focusSessionsTable),
+  focusSessions: many(focusSessionsTable)
 }));
 
 export const tasksRelations = relations(tasksTable, ({ one, many }) => ({
   user: one(usersTable, {
     fields: [tasksTable.user_id],
-    references: [usersTable.id],
+    references: [usersTable.id]
   }),
-  focusSessions: many(focusSessionsTable),
+  focusSessions: many(focusSessionsTable)
 }));
 
 export const focusSessionsRelations = relations(focusSessionsTable, ({ one }) => ({
   user: one(usersTable, {
     fields: [focusSessionsTable.user_id],
-    references: [usersTable.id],
+    references: [usersTable.id]
   }),
   task: one(tasksTable, {
     fields: [focusSessionsTable.task_id],
-    references: [tasksTable.id],
-  }),
+    references: [tasksTable.id]
+  })
 }));
 
 // TypeScript types for the table schemas
@@ -72,5 +75,5 @@ export type NewFocusSession = typeof focusSessionsTable.$inferInsert;
 export const tables = {
   users: usersTable,
   tasks: tasksTable,
-  focusSessions: focusSessionsTable,
+  focusSessions: focusSessionsTable
 };
